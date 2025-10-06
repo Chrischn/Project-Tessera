@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import os
 import glob
-import platform
 import sys
 
 EnsureSConsVersion(4, 0)
@@ -15,10 +14,6 @@ env = SConscript("external/godot-cpp/SConstruct")
 # - CPPFLAGS are for pre-processor flags
 # - CPPDEFINES are for pre-processor defines
 # - LINKFLAGS are for linking flags
-
-
-if platform.system() == 'Windows':
-    Command('build_niflib', [], r'external\niflib\build_static.bat')
 
 EXT_NAME = ARGUMENTS.get("gdextensionname", "niflib")
 EXT_DIR = f"extensions/src/"
