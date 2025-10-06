@@ -1,0 +1,87 @@
+[gd_scene load_steps=3 format=3 uid="uid://w7veat4ud02l"]
+
+[ext_resource type="Script" uid="uid://ci853aty6ytrr" path="res://scripts/SplashScreenScene.gd" id="1_x6cmj"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_a6mfr"]
+bg_color = Color(0.0470588, 0.0470588, 0.247059, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.258824, 0.352941, 0.6, 0.803922)
+corner_detail = 20
+
+[node name="02aSplashScreenScene" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_x6cmj")
+
+[node name="TextureRect_Ref1920x1080" type="TextureRect" parent="."]
+z_index = -1
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+metadata/_edit_lock_ = true
+
+[node name="MenuBackground" type="TextureRect" parent="."]
+z_index = -1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+expand_mode = 2
+metadata/_edit_lock_ = true
+
+[node name="PanelContainer" type="PanelContainer" parent="MenuBackground"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="Panel" parent="MenuBackground/PanelContainer"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_a6mfr")
+
+[node name="Label" type="Label" parent="MenuBackground/PanelContainer/Panel"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -879.5
+offset_top = -154.5
+offset_right = 879.5
+offset_bottom = 154.5
+grow_horizontal = 2
+grow_vertical = 2
+text = "## Legal & Trademarks
+This project is not affiliated with, sponsored, or endorsed by Take-Two Interactive Software, Inc. or Firaxis Games.
+“Sid Meier’s Civilization”, “Civilization”, and related marks are trademarks or registered trademarks of Take-Two Interactive Software, Inc. in the U.S. and other countries. All trademarks are the property of their respective owners.
+
+
+
+## No bundled game assets
+No original game assets (art, audio, text, binaries, installers, or DRM files) are distributed with this project.
+You must own a legitimate copy of Sid Meier’s Civilization® IV and the expansions Warlords and Beyond the Sword. On first run, the engine will prompt you to locate your Civ IV installation and will use (read-only) files from there.
+
+
+
+## Clean-room implementation
+The source code in this repository (excluding third-party code) was written from scratch, based on publicly available information and observed behavior for interoperability. 
+No decompiled, disassembled, or leaked source code from Civilization IV or its expansions was used.
+"
+horizontal_alignment = 1

@@ -1,0 +1,424 @@
+[gd_scene load_steps=8 format=3 uid="uid://menu"]
+
+[ext_resource type="Script" uid="uid://01dbbr5t40f5" path="res://scripts/MenuScene.gd" id="1_cqpf1"]
+[ext_resource type="Theme" uid="uid://cnql8ddx8awe7" path="res://themes/ExitGameGoBackButtons.tres" id="2_74fj3"]
+[ext_resource type="Theme" uid="uid://1qjgmfcbsccn" path="res://themes/MainMenuButtons.tres" id="3_jn0y1"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_y1jtl"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_7d3sl"]
+bg_color = Color(0.270588, 0.364706, 0.611765, 0.27451)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.258824, 0.352941, 0.6, 0.803922)
+corner_detail = 20
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_ltoya"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ltoya"]
+bg_color = Color(0.270588, 0.364706, 0.611765, 0.47451)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.258824, 0.352941, 0.6, 0.803922)
+corner_radius_top_left = 15
+corner_radius_top_right = 15
+corner_radius_bottom_right = 15
+corner_radius_bottom_left = 15
+corner_detail = 20
+expand_margin_left = 27.0
+expand_margin_top = 20.0
+expand_margin_right = 27.0
+expand_margin_bottom = 20.0
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_cqpf1")
+metadata/_edit_lock_ = true
+
+[node name="MenuBackground" type="TextureRect" parent="."]
+z_index = -1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+expand_mode = 2
+metadata/_edit_lock_ = true
+
+[node name="TextureRect_Ref1042x786" type="TextureRect" parent="."]
+visible = false
+z_index = -1
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+expand_mode = 2
+stretch_mode = 5
+metadata/_edit_lock_ = true
+
+[node name="TextureRect_Ref1920x1080" type="TextureRect" parent="."]
+visible = false
+z_index = -1
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+metadata/_edit_lock_ = true
+
+[node name="MenuLogo" type="BoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_right = 1.0
+anchor_bottom = 0.364
+grow_horizontal = 2
+alignment = 1
+metadata/_edit_lock_ = true
+
+[node name="MarginContainer" type="MarginContainer" parent="MenuLogo"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/margin_left = 87
+theme_override_constants/margin_top = 90
+theme_override_constants/margin_right = 95
+
+[node name="Logo" type="TextureRect" parent="MenuLogo/MarginContainer"]
+custom_minimum_size = Vector2(928.23, 218.125)
+layout_mode = 2
+expand_mode = 2
+
+[node name="MenuBottomBar" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -47.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_y1jtl")
+
+[node name="Panel" type="Panel" parent="MenuBottomBar"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_7d3sl")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MenuBottomBar"]
+layout_mode = 2
+
+[node name="MarginContainer" type="MarginContainer" parent="MenuBottomBar/HBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_right = 24
+
+[node name="ExitGameButton" type="Button" parent="MenuBottomBar/HBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 4
+theme = ExtResource("2_74fj3")
+text = "EXIT GAME"
+
+[node name="GoBackButton" type="Button" parent="MenuBottomBar/HBoxContainer"]
+visible = false
+layout_mode = 2
+size_flags_vertical = 4
+theme = ExtResource("2_74fj3")
+text = "GO BACK"
+
+[node name="MenuCenter" type="BoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_top = -18.0
+grow_horizontal = 2
+size_flags_vertical = 0
+theme = ExtResource("3_jn0y1")
+alignment = 1
+metadata/_edit_lock_ = true
+
+[node name="DefaultMenu" type="PanelContainer" parent="MenuCenter"]
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_ltoya")
+
+[node name="Panel" type="Panel" parent="MenuCenter/DefaultMenu"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_ltoya")
+
+[node name="MenuButtons" type="VBoxContainer" parent="MenuCenter/DefaultMenu"]
+layout_mode = 2
+size_flags_vertical = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="SinglePlayerButton" type="Button" parent="MenuCenter/DefaultMenu/MenuButtons"]
+layout_mode = 2
+text = "SINGLE PLAYER"
+
+[node name="MultiplayerButton" type="Button" parent="MenuCenter/DefaultMenu/MenuButtons"]
+layout_mode = 2
+text = "MULTIPLAYER"
+
+[node name="HallOfFameButton" type="Button" parent="MenuCenter/DefaultMenu/MenuButtons"]
+layout_mode = 2
+text = "VIEW HALL OF FAME"
+
+[node name="CivilopediaButton" type="Button" parent="MenuCenter/DefaultMenu/MenuButtons"]
+layout_mode = 2
+text = "CIVILOPEDIA"
+
+[node name="TutorialButton" type="Button" parent="MenuCenter/DefaultMenu/MenuButtons"]
+layout_mode = 2
+text = "TUTORIAL"
+
+[node name="AdvancedButton" type="Button" parent="MenuCenter/DefaultMenu/MenuButtons"]
+layout_mode = 2
+text = "ADVANCED"
+
+[node name="SubMenuSingleplayer" type="PanelContainer" parent="MenuCenter"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_ltoya")
+metadata/_edit_lock_ = true
+
+[node name="Panel" type="Panel" parent="MenuCenter/SubMenuSingleplayer"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_ltoya")
+
+[node name="MenuButtons" type="VBoxContainer" parent="MenuCenter/SubMenuSingleplayer"]
+layout_mode = 2
+size_flags_vertical = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="PlayNowButton" type="Button" parent="MenuCenter/SubMenuSingleplayer/MenuButtons"]
+layout_mode = 2
+text = "PLAW NOW!"
+
+[node name="LoadGameButton" type="Button" parent="MenuCenter/SubMenuSingleplayer/MenuButtons"]
+layout_mode = 2
+text = "LOAD GAME"
+
+[node name="PlayScenarioButton" type="Button" parent="MenuCenter/SubMenuSingleplayer/MenuButtons"]
+layout_mode = 2
+text = "PLAY A SCENARIO"
+
+[node name="CustomGameButton" type="Button" parent="MenuCenter/SubMenuSingleplayer/MenuButtons"]
+layout_mode = 2
+text = "CUSTOM GAME"
+
+[node name="CustomScenarioButton" type="Button" parent="MenuCenter/SubMenuSingleplayer/MenuButtons"]
+layout_mode = 2
+text = "CUSTOM SCENARIO"
+
+[node name="SubMenuMultiplayer" type="PanelContainer" parent="MenuCenter"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_ltoya")
+metadata/_edit_lock_ = true
+
+[node name="Panel" type="Panel" parent="MenuCenter/SubMenuMultiplayer"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_ltoya")
+
+[node name="MenuButtons" type="VBoxContainer" parent="MenuCenter/SubMenuMultiplayer"]
+layout_mode = 2
+size_flags_vertical = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="LANGamesButton" type="Button" parent="MenuCenter/SubMenuMultiplayer/MenuButtons"]
+layout_mode = 2
+text = "LAN GAMES"
+
+[node name="InternetGamesButton" type="Button" parent="MenuCenter/SubMenuMultiplayer/MenuButtons"]
+layout_mode = 2
+text = "INTERNET GAMES"
+
+[node name="DirectIPConnectionButton" type="Button" parent="MenuCenter/SubMenuMultiplayer/MenuButtons"]
+layout_mode = 2
+text = "DIRECT IP CONNECTOIN"
+
+[node name="HotSeatButton" type="Button" parent="MenuCenter/SubMenuMultiplayer/MenuButtons"]
+layout_mode = 2
+text = "HOT SEAT"
+
+[node name="PlaybyEmailButton" type="Button" parent="MenuCenter/SubMenuMultiplayer/MenuButtons"]
+layout_mode = 2
+text = "PLAY BY E-MAIL"
+
+[node name="SubMenuInternetGames" type="PanelContainer" parent="MenuCenter"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_ltoya")
+metadata/_edit_lock_ = true
+
+[node name="Panel" type="Panel" parent="MenuCenter/SubMenuInternetGames"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_ltoya")
+
+[node name="MenuButtons" type="VBoxContainer" parent="MenuCenter/SubMenuInternetGames"]
+layout_mode = 2
+size_flags_vertical = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="LoginButton" type="Button" parent="MenuCenter/SubMenuInternetGames/MenuButtons"]
+layout_mode = 2
+text = "LOGIN"
+
+[node name="CreateNewAccountButton" type="Button" parent="MenuCenter/SubMenuInternetGames/MenuButtons"]
+layout_mode = 2
+text = "CREATE NEW ACCOUNT"
+
+[node name="SubMenuHotSeat" type="PanelContainer" parent="MenuCenter"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_ltoya")
+metadata/_edit_lock_ = true
+
+[node name="Panel" type="Panel" parent="MenuCenter/SubMenuHotSeat"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_ltoya")
+
+[node name="MenuButtons" type="VBoxContainer" parent="MenuCenter/SubMenuHotSeat"]
+layout_mode = 2
+size_flags_vertical = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="NewGameButton" type="Button" parent="MenuCenter/SubMenuHotSeat/MenuButtons"]
+layout_mode = 2
+text = "NEW GAME"
+
+[node name="NewScenarioButton" type="Button" parent="MenuCenter/SubMenuHotSeat/MenuButtons"]
+layout_mode = 2
+text = "NEW SCENARIO"
+
+[node name="LoadGameButton" type="Button" parent="MenuCenter/SubMenuHotSeat/MenuButtons"]
+layout_mode = 2
+text = "LOAD GAME"
+
+[node name="SubMenuPlayByEmail" type="PanelContainer" parent="MenuCenter"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_ltoya")
+metadata/_edit_lock_ = true
+
+[node name="Panel" type="Panel" parent="MenuCenter/SubMenuPlayByEmail"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_ltoya")
+
+[node name="MenuButtons" type="VBoxContainer" parent="MenuCenter/SubMenuPlayByEmail"]
+layout_mode = 2
+size_flags_vertical = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="NewGameButton" type="Button" parent="MenuCenter/SubMenuPlayByEmail/MenuButtons"]
+layout_mode = 2
+text = "NEW GAME"
+
+[node name="NewScenarioButton" type="Button" parent="MenuCenter/SubMenuPlayByEmail/MenuButtons"]
+layout_mode = 2
+text = "NEW SCENARIO"
+
+[node name="LoadGameButton" type="Button" parent="MenuCenter/SubMenuPlayByEmail/MenuButtons"]
+layout_mode = 2
+text = "LOAD GAME"
+
+[node name="SubMenuAdvanced" type="PanelContainer" parent="MenuCenter"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 4
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxEmpty_ltoya")
+metadata/_edit_lock_ = true
+
+[node name="Panel" type="Panel" parent="MenuCenter/SubMenuAdvanced"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_ltoya")
+
+[node name="MenuButtons" type="VBoxContainer" parent="MenuCenter/SubMenuAdvanced"]
+layout_mode = 2
+size_flags_vertical = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="AboutBuildButton" type="Button" parent="MenuCenter/SubMenuAdvanced/MenuButtons"]
+layout_mode = 2
+text = "ABOUT THIS BUILD"
+
+[node name="LoadModButton" type="Button" parent="MenuCenter/SubMenuAdvanced/MenuButtons"]
+layout_mode = 2
+text = "LOAD A MOD"
+
+[node name="OptionsButton" type="Button" parent="MenuCenter/SubMenuAdvanced/MenuButtons"]
+layout_mode = 2
+text = "OPTIONS"
+
+[node name="CheckUpdatesButton" type="Button" parent="MenuCenter/SubMenuAdvanced/MenuButtons"]
+layout_mode = 2
+text = "CHECK FOR UPDATES"
+
+[node name="CreditsButton" type="Button" parent="MenuCenter/SubMenuAdvanced/MenuButtons"]
+layout_mode = 2
+text = "CREDITS"
+
+[node name="SubMenuCredits" type="BoxContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -278.0
+offset_top = -341.0
+offset_right = 442.0
+offset_bottom = 289.0
+grow_horizontal = 2
+grow_vertical = 2
+metadata/_edit_lock_ = true
+
+[node name="PanelContainer" type="PanelContainer" parent="SubMenuCredits"]
+custom_minimum_size = Vector2(720, 630)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxEmpty_ltoya")
+
+[node name="Panel" type="Panel" parent="SubMenuCredits/PanelContainer"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_ltoya")
+
+[node name="ColorRect" type="ColorRect" parent="SubMenuCredits/PanelContainer"]
+visible = false
+layout_mode = 2
+color = Color(0.258824, 0.352941, 0.6, 1)
+
+[node name="AudioStreamPlayer" type="AudioStreamPlayer" parent="."]

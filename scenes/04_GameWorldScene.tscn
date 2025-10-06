@@ -1,0 +1,24 @@
+[gd_scene load_steps=3 format=3 uid="uid://chwsce5darvty"]
+
+[ext_resource type="Script" uid="uid://cp524vky5x2jo" path="res://scripts/GameWorldScene.gd" id="1_xlnkm"]
+[ext_resource type="Script" uid="uid://c5ffua0yrvqft" path="res://scripts/PlayerPivot.gd" id="2_bel4h"]
+
+[node name="GameWorld" type="Node3D"]
+script = ExtResource("1_xlnkm")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.16626, 88.6427, 0.363083)
+light_energy = 2.0
+light_indirect_energy = 2.0
+
+[node name="PlayerPivot" type="Node3D" parent="." node_paths=PackedStringArray("cam")]
+script = ExtResource("2_bel4h")
+cam = NodePath("Camera3D")
+move_speed = 16.0
+sprint_multiplier = 3.0
+mouse_sens = 0.001
+
+[node name="Camera3D" type="Camera3D" parent="PlayerPivot"]
+transform = Transform3D(0.906308, 0, 0.422618, 0, 1, 0, -0.422618, 0, 0.906308, 250, 65, 400)

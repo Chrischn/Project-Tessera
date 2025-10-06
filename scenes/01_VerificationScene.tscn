@@ -1,0 +1,26 @@
+[gd_scene load_steps=2 format=3 uid="uid://b6k2yvijiyw5r"]
+
+[ext_resource type="Script" uid="uid://dwsxn2mkptqmx" path="res://scripts/VerificationScene.gd" id="1_m4jga"]
+
+[node name="VerificationScene" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_m4jga")
+metadata/_edit_lock_ = true
+
+[node name="FileDialog" type="FileDialog" parent="."]
+title = "Open a File"
+initial_position = 1
+ok_button_text = "Open"
+file_mode = 0
+access = 2
+filters = PackedStringArray("Civ4BeyondSword.exe ; Executable Files")
+use_native_dialog = true
+
+[connection signal="file_selected" from="FileDialog" to="." method="_on_FileDialog_file_selected"]

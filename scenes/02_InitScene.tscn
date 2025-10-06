@@ -1,0 +1,119 @@
+[gd_scene load_steps=5 format=3 uid="uid://daxesbrcc4v4i"]
+
+[ext_resource type="Script" uid="uid://cpolmj8c32gpi" path="res://scripts/InitScene.gd" id="1_1haxj"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_0mcur"]
+bg_color = Color(0.941176, 0.941176, 0.941176, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_w2gy6"]
+bg_color = Color(0.941176, 0.941176, 0.941176, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_p7pp8"]
+bg_color = Color(0, 0.470588, 0.803922, 1)
+
+[node name="InitScene" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_1haxj")
+metadata/_edit_lock_ = true
+
+[node name="InitWindow" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -305.0
+offset_top = -180.0
+offset_right = 305.0
+offset_bottom = 180.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PanelContainer" type="PanelContainer" parent="InitWindow"]
+layout_mode = 2
+
+[node name="InitWindowBG" type="Panel" parent="InitWindow/PanelContainer"]
+custom_minimum_size = Vector2(610, 360)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_0mcur")
+
+[node name="MarginContainer" type="MarginContainer" parent="InitWindow/PanelContainer/InitWindowBG"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -307.5
+offset_top = -182.5
+offset_right = 307.5
+offset_bottom = 182.5
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 5
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 5
+theme_override_constants/margin_bottom = 5
+
+[node name="InitBGTexture" type="TextureRect" parent="InitWindow/PanelContainer/InitWindowBG/MarginContainer"]
+custom_minimum_size = Vector2(605, 355)
+layout_mode = 2
+expand_mode = 2
+
+[node name="ProgressTextPanel" type="Panel" parent="InitWindow/PanelContainer/InitWindowBG"]
+custom_minimum_size = Vector2(316, 30)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -158.0
+offset_top = 13.0
+offset_right = 158.0
+offset_bottom = 43.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_w2gy6")
+
+[node name="ProgressText" type="Label" parent="InitWindow/PanelContainer/InitWindowBG/ProgressTextPanel"]
+custom_minimum_size = Vector2(316, 30)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -11.5
+offset_right = 20.0
+offset_bottom = 11.5
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ProgressBar" type="Panel" parent="InitWindow/PanelContainer/InitWindowBG"]
+custom_minimum_size = Vector2(316, 30)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -169.0
+offset_top = 64.0
+offset_right = 169.0
+offset_bottom = 94.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_p7pp8")
