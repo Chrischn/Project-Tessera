@@ -6,7 +6,7 @@
 
 A prototype for an independent, open-source re-implementation of the runtime engine for the 2005 game “Sid Meier’s Civilization® IV” and its expansions “Warlords” and “Beyond the Sword”, powered by the Godot game engine.
 
-Status: prototype / work in progress.
+Status: `prototype / work in progress`
 
 -------
 
@@ -68,12 +68,12 @@ These instructions will get you a copy of the project up and running on your loc
 
 * Download and install Visual Studio 2022 (Community): https://visualstudio.microsoft.com/de/vs/
 
-	* During installation - choose "Desktop development with C++" from workloads
+	* During installation - choose `Desktop development with C++` from workloads
 
 * Download and install Python: https://www.python.org/downloads/
 
-	* During installation - add Python to PATH option 
-	* Once installed - use the following command via Python console: py -m pip install -U pip scons
+	* During installation - add `Python to PATH option`
+	* Once installed - use the following command via Python console: `py -m pip install -U pip scons`
 
 ### Installing
 
@@ -81,9 +81,9 @@ A step by step set of instructions that tell you how to get a development env ru
 
 * Start "Git CMD":
 
-	* cd [YourDesiredFolder]
-	* git clone https://github.com/Chrischn/Project-Tessera.git
-	* git submodule update --init --recursive
+	* `cd [YourDesiredFolder]`
+	* `git clone https://github.com/Chrischn/Project-Tessera.git`
+	* `git submodule update --init --recursive`
 
 
 * Go to folder Project-Tessera/external/niflib and start "build_static.bat". 
@@ -91,8 +91,8 @@ A step by step set of instructions that tell you how to get a development env ru
 
 * Start Developer Command Prompt for VS 2022 and use these commands:
 
-	* cd [Project-Tessera Location]
-	* scons platform=windows custom_api_file="extension_api.json" target=template_debug debug_symbols=yes debug_crt=yes
+	* `cd [Project-Tessera Location]`
+	* `scons platform=windows custom_api_file="extension_api.json" target=template_debug debug_symbols=yes debug_crt=yes`
 
 
 * Open project.godot with "Godot_v4.5-stable_win64_console.exe"
