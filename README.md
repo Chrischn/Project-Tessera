@@ -1,4 +1,4 @@
-[![Project Tessera](/Project_Tessera_Logo.svg)](https://github.com/Chrischn/Project-Tessera/)
+[![Project Tessera](/assets/logos/Project_Tessera_Logo.svg)](https://github.com/Chrischn/Project-Tessera/)
 [![GitHub license](https://img.shields.io/github/license/Chrischn/Project-Tessera?style=flat-square)](https://github.com/Chrischn/Project-Tessera/LICENSE.md)
 -------
 
@@ -12,8 +12,9 @@ Status: `prototype / work in progress`
 
 ## Legal & Trademarks
 
-This project is not affiliated with, sponsored, or endorsed by Take-Two Interactive Software, Inc. or Firaxis Games.
-“Sid Meier’s Civilization”, “Civilization”, and related marks are trademarks or registered trademarks of Take-Two Interactive Software, Inc. in the U.S. and other countries. All trademarks are the property of their respective owners.
+This project is not affiliated with, sponsored, or endorsed by Take-Two Interactive Software, Inc., Firaxis Games or Gamebase Co., Ltd.
+“Sid Meier’s Civilization”, “Civilization”, and related marks are trademarks or registered trademarks of Take-Two Interactive Software, Inc. in the U.S. and other countries. “Gamebryo, LightSpeed” and related marks are trademarks or registered trademarks of Gamebase Co., Ltd. 
+All trademarks are the property of their respective owners.
 
 ## No bundled game assets
 
@@ -22,17 +23,17 @@ You must own a legitimate copy of Sid Meier’s Civilization® IV and the expans
 
 ## Clean-room implementation
 
-The source code in this repository (excluding third-party code) was written from scratch, based on publicly available information and observed behavior for interoperability. No decompiled, disassembled, or leaked source code from Civilization IV or its expansions was used.
+The source code in this repository (excluding third-party code) was written from scratch, based on publicly available information and observed behavior for interoperability. No decompiled, disassembled, or leaked source code from Civilization IV, its expansions or the Gamebryo engine was used.
 
 -------
 ## The Project
 
 ### What is this all about?
-I've wished for a modern Civ 4 release in 64-bit for ages, probably just like many of you did too. The modability of Civ 4 is unmatched in the series but the constant crashes and the long loading times when playing with some of the amazing mods out there are caused by the 32-bit technical barrier, that can't really be worked around without changes to the underlying engine. 
+I've wished for a modern Civ 4 release in 64-bit for ages, just like many of you probably did/do too. The modability of Civ 4 is unmatched in the series but the constant crashes and the long loading times when playing with some of the amazing mods out there are caused by a 32-bit technical barrier, that can only partially be worked around, without changes to the underlying engine. 
 
-The 25th of October 2025 marks the 20th anniversary of Civ 4's original release and it's about time to take things into our own hands if we ever want to see a Civ 4 "remaster" happen! Inspired by [Blake00](https://forums.civfanatics.com/threads/rebuilding-parts-of-civ4-multithreading-64bit-memory-access-to-increase-civ4s-speed-in-large-games.688441/)'s initial thread in the CivFanatics Forums and [snowern](https://forums.civfanatics.com/threads/mini-engine-progress.691873/)'s 64-bit Mini-Engine, I decided to start things off. 
+The 25th of October 2025 marks the 20th anniversary of Civ 4's original release with no official remaster in sight and that's why it's about time to take things into our own hands if we ever want to see it happen! Inspired by [Blake00](https://forums.civfanatics.com/threads/rebuilding-parts-of-civ4-multithreading-64bit-memory-access-to-increase-civ4s-speed-in-large-games.688441/)'s initial thread in the CivFanatics Forums and [snowern](https://forums.civfanatics.com/threads/mini-engine-progress.691873/)'s 64-bit Mini-Engine and despite my lack of a professional software engineering background, I decided to kick things off! 
 
-So to anwser the question: I want this project to be the starting point of a community-driven effort to achieve a re-implementation of Civ 4 on a modern engine, namely Godot. We have all the pieces, we just need to put them together!
+So to anwser the question: I want this project to be the starting point of a community-driven effort to build upon a modern engine, namely Godot, to play mods created for Civilization IV with support for 64bit. We have all the mosaic tiles, we just need to put them together!
 
 ### Why is it called "Project Tessera"?
 
@@ -44,7 +45,7 @@ So to anwser the question: I want this project to be the starting point of a com
 
 	Is there a more fitting name to be used as a working title to describe a tile-based historic game??
 
-* Also: "Tessera/Tessara" means ["FOUR"](https://en.wiktionary.org/wiki/tessera-#English) in old-greek... *it's destiny!*
+* Still not convinvced? "Tessera/Tessara" means ["FOUR"](https://en.wiktionary.org/wiki/tessera-#English) in old-greek... *it's meant to be!*
 
 ### Some more inspiration:
 * [Civilization IV: Prototyping](https://www.youtube.com/watch?v=QTM7TT7bOUk)
@@ -59,13 +60,13 @@ So to anwser the question: I want this project to be the starting point of a com
 ## Current Status / Goals (last updated: 2025-10-12)
 
 ### Status
-* The verification of the original .exe files works
+* Verification of the original .exe file works
 
-* The loading of .fpk archives works
+* Loading of .fpk archives works
 
-* A basic main menu is present
+* Basic main menu is implemented
 
-* The loading of .nif files works (only meshes are drawn in 3D for now)
+* Loading of .nif files works (only meshes are drawn in 3D for now)
 
 ### Goals
 * Continue development of .nif file import function and translation to Godot nodes
@@ -168,6 +169,8 @@ See also the list of [contributors](https://github.com/Chrischn/Project-Tessera/
 ## Acknowledgments
 
 * Soren Johnson - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-soren-johnson-design-director/)
+* Dale Kent - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-dale-kent-daniels-umanovskis/)
 * Dorian Newcomb - [MobyGames](https://www.mobygames.com/person/50573/dorian-newcomb/)
 * Blake00 - [CivFanatics page](https://forums.civfanatics.com/members/blake00.284327/)
 * snowern - [CivFanatics page](https://forums.civfanatics.com/members/snowern.304450/)
+* Nightinggale - [CivFanatics page](https://forums.civfanatics.com/members/nightinggale.158038/)
