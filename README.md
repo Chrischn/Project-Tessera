@@ -28,19 +28,23 @@ The source code in this repository (excluding third-party code) was written from
 ## The Project
 
 ### What is this all about?
-I've wished for a modern Civ 4 release in 64-bit for ages, probably just like many of you do too. The modability of Civ 4 is unmatched in the series but the constant crashes and the long loading times when playing with some of the amazing mods out there are a technical barrier that can't really be worked around without changes to the underlying engine. The 25th of October 2025 marks the 20th anniversary of Civ 4's original release and it's about time to take things into our own hands if we ever want to see it happen. Inspired by Blake00 [CivFanatics](https://forums.civfanatics.com/threads/rebuilding-parts-of-civ4-multithreading-64bit-memory-access-to-increase-civ4s-speed-in-large-games.688441/)'s initial thread in the CivFanatics Forums and snowern [CivFanatics](https://forums.civfanatics.com/threads/mini-engine-progress.691873/)'s 64-bit Mini-Engine, I decided to start things off. So to anwser the question: I want this project to be the starting point of a community-driven effort to achieve a re-implementation of Civ 4. We have all the pieces, we just need to put them together!
+I've wished for a modern Civ 4 release in 64-bit for ages, probably just like many of you did too. The modability of Civ 4 is unmatched in the series but the constant crashes and the long loading times when playing with some of the amazing mods out there are caused by the 32-bit technical barrier, that can't really be worked around without changes to the underlying engine. 
+
+The 25th of October 2025 marks the 20th anniversary of Civ 4's original release and it's about time to take things into our own hands if we ever want to see it happen! Inspired by [Blake00](https://forums.civfanatics.com/threads/rebuilding-parts-of-civ4-multithreading-64bit-memory-access-to-increase-civ4s-speed-in-large-games.688441/)'s initial thread in the CivFanatics Forums and [snowern](https://forums.civfanatics.com/threads/mini-engine-progress.691873/)'s 64-bit Mini-Engine, I decided to start things off. 
+
+So to anwser the question: I want this project to be the starting point of a community-driven effort to achieve a re-implementation of Civ 4 on a modern engine, namely Godot. We have all the pieces, we just need to put them together!
 
 ### Why is it called "Project Tessera"?
 
-* To cite the legend himself, Soren Johnson, Lead Designer & AI Programmer of Civilization 4: "Civilization is a [Tile-Based game](https://www.youtube.com/watch?v=y7AV3tNYd5g&t=2533s). That's the fundamental feature of the game."
+* To cite the legend himself, **Soren Johnson**, Lead Designer & AI Programmer of Civilization 4: "Civilization is a [Tile-Based game](https://www.youtube.com/watch?v=y7AV3tNYd5g&t=2533s). That's the fundamental feature of the game."
 
-Great! But what's that got to do with the word "Tessera"!?
+	Great! But what's that got to do with the word "Tessera"!?
 
 * [Wikipedia](https://en.wikipedia.org/wiki/Tessera): *"A tessera (plural: tesserae, diminutive tessella) is an individual tile, usually formed in the shape of a square, used in creating a mosaic."*
 
-Is there a more fitting name to use as a working title to describe a tile-based historic game??
+	Is there a more fitting name to be used as a working title to describe a tile-based historic game??
 
-* Also: Tessera/Tessara means "four" [Wiktionary](https://en.wiktionary.org/wiki/tessera-#English) in old-greek... it must be destiny!
+* Also: "Tessera/Tessara" means ["FOUR"](https://en.wiktionary.org/wiki/tessera-#English) in old-greek... *it's destiny!*
 
 ### Some more inspiration:
 * [Civilization IV: Prototyping](https://www.youtube.com/watch?v=QTM7TT7bOUk)
