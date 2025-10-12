@@ -2,13 +2,11 @@
 [![GitHub license](https://img.shields.io/github/license/Chrischn/Project-Tessera?style=flat-square)](https://github.com/Chrischn/Project-Tessera/LICENSE.md)
 -------
 
-# Project Tessera
-
 A prototype for an independent, open-source re-implementation of the runtime engine for the 2005 game “Sid Meier’s Civilization® IV” and its expansions “Warlords” and “Beyond the Sword”, powered by the Godot game engine.
 
 Status: `prototype / work in progress`
 
--------
+
 
 ## Legal & Trademarks
 
@@ -26,7 +24,7 @@ You must own a legitimate copy of Sid Meier’s Civilization® IV and the expans
 The source code in this repository (excluding third-party code) was written from scratch, based on publicly available information and observed behavior for interoperability. No decompiled, disassembled, or leaked source code from Civilization IV, its expansions or the Gamebryo engine was used.
 
 -------
-## The Project
+# The Project
 
 ### What is this all about?
 I've wished for a modern Civ 4 release in 64-bit for ages, just like many of you probably did/do too. The modability of Civ 4 is unmatched in the series but the constant crashes and the long loading times when playing with some of the amazing mods out there are caused by a 32-bit technical barrier, that can only partially be worked around, without changes to the underlying engine. 
