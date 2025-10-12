@@ -1,9 +1,7 @@
 # =============================================================================
 # Script Name:        SplashScreenScene.gd
-# Author:             Chrischn89
-# Created:            2025-10-05
-# Last Updated:       2025-10-06
-# Godot Version:      4.4.1
+# Author(s):          Chrischn89
+# Godot Version:      4.5
 # Description:        
 #     SplashScreenScene shows important legal notices
 #

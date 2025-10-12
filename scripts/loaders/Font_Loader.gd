@@ -1,9 +1,7 @@
 # =============================================================================
 # Script Name:        Font_Loader.gd
-# Author:             Chrischn89
-# Created:            2025-08-15
-# Last Updated:       2025-10-05
-# Godot Version:      4.4.1
+# Author(s):          Chrischn89
+# Godot Version:      4.5
 # Description:        
 #     Loads all fonts into the global array Global.fonts {}
 #
@@ -22,7 +20,7 @@
 extends RefCounted
 class_name Font_Loader
 
-## Loads all the critical assets for booting (textures, fonts, etc.)
+## Loads all the fonts used by the game
 static func load_fonts(base_path: String) -> void:
 	
 	# Load fonts

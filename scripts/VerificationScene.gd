@@ -1,9 +1,7 @@
 # =============================================================================
 # Script Name:        VerificationScene.gd
-# Author:             Chrischn89
-# Created:            2025-07-26
-# Last Updated:       2025-10-06
-# Godot Version:      4.4.1
+# Author(s):          Chrischn89
+# Godot Version:      4.5
 # Description:        
 #	VerificationScene.gd forces the user to point to a valid Civ4BeyondSword.exe
 #	in order to load original assets from the relative folder path

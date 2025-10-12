@@ -1,9 +1,7 @@
 # =============================================================================
 # Script Name:        Class_ImageTextureUtil.gd
-# Author:             Chrischn89
-# Created:            2025-08-13
-# Last Updated:       2025-10-05
-# Godot Version:      4.4.1
+# Author(s):          Chrischn89
+# Godot Version:      4.5
 # Description:        
 #	GameWorldScene.gd controls the game's main 3D world
 #

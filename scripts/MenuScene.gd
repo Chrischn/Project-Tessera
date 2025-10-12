@@ -1,9 +1,7 @@
 # =============================================================================
 # Script Name:        MenuScene.gd
-# Author:             Chrischn89
-# Created:            2025-07-21
-# Last Updated:       2025-10-05
-# Godot Version:      4.4.1
+# Author(s):          Chrischn89
+# Godot Version:      4.5
 # Description:        
 #	MenuScene.gd controls functionality and partly the design of the game's
 #	main menu
@@ -41,10 +39,10 @@ func init_MenuScene() -> void:
 	
 	find_child("MenuBackground").texture = ImageTextureUtil.load_dds_from_buffer(Global.assets3["main menu\\stars.dds"])	# Load main menu background
 	#find_child("Logo").texture = ImageTextureUtil.load_dds_from_buffer(Global.assets1["main menu\\civtitle.dds"])	# Load main menu logo
-	find_child("Logo").texture = ImageTextureUtil.load_texture_from_file((Global.load_value_from_config("GAME","original_folder_path")).path_join("Resource/Temp/select_c.tga"))
+	#find_child("Logo").texture = ImageTextureUtil.load_texture_from_file((Global.load_value_from_config("GAME","original_folder_path")).path_join("Resource/Temp/select_c.tga"))
 	
-	#find_child("Logo").texture = load("res://T_logo.svg")
-	#find_child("Logo").stretch_mode = TextureRect.STRETCH_KEEP
+	find_child("Logo").texture = load("res://assets/logos/Project_Tessera_Logo.svg")
+	find_child("Logo").stretch_mode = TextureRect.EXPAND_FIT_HEIGHT_PROPORTIONAL
 	
 	
 	var music = AudioStreamMP3.load_from_file(base_path.path_join("Assets/Sounds/Soundtrack/OpeningMenu.mp3"))	# Load main menu music

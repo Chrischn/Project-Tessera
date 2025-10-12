@@ -11,6 +11,9 @@ Documentation: dOxygen? UML?
 Unit Testing: ?
 Comments: ?
 
+-GDScripts Style Guide-
+[https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_styleguide.html]
+
 Additional sources for research on this topic:
-* "The Power of 10" - https://en.wikipedia.org/wiki/The_Power_of_10:_Rules_for_Developing_Safety-Critical_Code
-* "What is Clean Code?" - https://www.youtube.com/watch?v=RAr4-MD10pQ
+* "The Power of 10" [https://en.wikipedia.org/wiki/The_Power_of_10:_Rules_for_Developing_Safety-Critical_Code]
+* "What is Clean Code?" [https://www.youtube.com/watch?v=RAr4-MD10pQ]

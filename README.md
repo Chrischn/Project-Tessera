@@ -56,6 +56,32 @@ So to anwser the question: I want this project to be the starting point of a com
 * [DESIGNER NOTES - Soren Johnson's Game Design Journal](https://www.designer-notes.com/category/civ/)
 
 -------
+## Current Status / Goals (last updated: 2025-10-12)
+
+### Status
+* The verification of the original .exe files works
+
+* The loading of .fpk archives works
+
+* A basic main menu is present
+
+* The loading of .nif files works (only meshes are drawn in 3D for now)
+
+### Goals
+* Continue development of .nif file import function and translation to Godot nodes
+
+* Rework the build pipe (Scons -> CMake?)
+
+* Plan out the integration of CvGameCoreDLL -> what about compability with saves and mods?
+
+* Create basic landscape drawing in 3D world
+
+* XML Import (requires CvGameCoreDLL?)
+
+* GUI theme import (requires CvGameCoreDLL?)
+
+
+-------
 ## Getting Started (Windows-only)(for developers)
 
 These instructions will get you a copy of the project up and running on your local machine for development and testing purposes.

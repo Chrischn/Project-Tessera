@@ -1,9 +1,7 @@
 # =============================================================================
 # Script Name:        InitScene.gd
-# Author:             Chrischn89
-# Created:            2025-07-26
-# Last Updated:       2025-10-06
-# Godot Version:      4.4.1
+# Author(s):          Chrischn89
+# Godot Version:      4.5
 # Description:        
 #     InitScene loads and set ups important assets to start the game
 #

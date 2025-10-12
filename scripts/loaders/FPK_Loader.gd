@@ -1,9 +1,7 @@
 # =============================================================================
 # Script Name:        FPK_Loader.gd
-# Author:             Chrischn89
-# Created:            2025-07-26
-# Last Updated:       2025-10-05
-# Godot Version:      4.4.1
+# Author(s):          Chrischn89
+# Godot Version:      4.5
 # Description:        
 #     Reads and parses the header, filelist and files of a .fpk archive, 
 #     prints its information to the console and returns a Dictionary with

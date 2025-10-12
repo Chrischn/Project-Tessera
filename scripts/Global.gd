@@ -1,9 +1,7 @@
 # =============================================================================
 # Script Name:        Global.gd
-# Author:             Chrischn89
-# Created:            2025-07-25
-# Last Updated:       2025-10-05
-# Godot Version:      4.4.1
+# Author(s):          Chrischn89
+# Godot Version:      4.5
 # Description:        
 #	Global.gd provides globally available arrays for storing loaded assets and
 #	provides globally avaiable functions for basic operations like saving
