@@ -36,7 +36,7 @@ So to anwser the question: I want this project to be the starting point of a com
 
 ### Why is it called "Project Tessera"?
 
-* To cite the legend himself, **Soren Johnson**, Lead Designer & AI Programmer of Civilization 4: "Civilization is a [Tile-Based game](https://www.youtube.com/watch?v=y7AV3tNYd5g&t=2533s). That's the fundamental feature of the game."
+* To cite the legend himself, **Soren Johnson**, Lead Designer & AI Programmer of Civilization 4: *"Civilization is a [Tile-Based game](https://www.youtube.com/watch?v=y7AV3tNYd5g&t=2533s). That's the fundamental feature of the game."*
 
 	Great! But what's that got to do with the word "Tessera"!?
 
@@ -56,7 +56,7 @@ So to anwser the question: I want this project to be the starting point of a com
 * [DESIGNER NOTES - Soren Johnson's Game Design Journal](https://www.designer-notes.com/category/civ/)
 
 -------
-## Getting Started (Windows-only)(developers-only)
+## Getting Started (Windows-only)(for developers)
 
 These instructions will get you a copy of the project up and running on your local machine for development and testing purposes.
 
@@ -118,6 +118,7 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on the process for su
 ## Authors
 
 * **Chrischn89** - *Initial work* - [Chrischn](https://github.com/Chrischn)
+*Your name could be here!*
 
 See also the list of [contributors](https://github.com/Chrischn/Project-Tessera/graphs/contributors) who participated in this project.
 
@@ -139,8 +140,7 @@ See also the list of [contributors](https://github.com/Chrischn/Project-Tessera/
 -------
 ## Acknowledgments
 
-* Soren Johnson [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-soren-johnson-design-director/)
-* Dorian Newcomb [MobyGames](https://www.mobygames.com/person/50573/dorian-newcomb/)
-* Blake00 [CivFanatics](https://forums.civfanatics.com/members/blake00.284327/)
-* snowern [CivFanatics](https://forums.civfanatics.com/members/snowern.304450/)
-* *Your name could be here!*
+* Soren Johnson - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-soren-johnson-design-director/)
+* Dorian Newcomb - [MobyGames](https://www.mobygames.com/person/50573/dorian-newcomb/)
+* Blake00 - [CivFanatics](https://forums.civfanatics.com/members/blake00.284327/)
+* snowern - [CivFanatics](https://forums.civfanatics.com/members/snowern.304450/)
