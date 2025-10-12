@@ -1,7 +1,6 @@
 [![Project Tessera](/Project_Tessera_Logo.svg)](https://github.com/Chrischn/Project-Tessera/)
-[![GitHub license](https://img.shields.io/github/license/Chrischn/Project-Tessera?style=flat-square)](https://github.com/Chrischn/Project-Tessera/LICENSE)
+[![GitHub license](https://img.shields.io/github/license/Chrischn/Project-Tessera?style=flat-square)](https://github.com/Chrischn/Project-Tessera/LICENSE.md)
 -------
-
 
 # Project Tessera
 
@@ -26,7 +25,6 @@ You must own a legitimate copy of Sid Meier’s Civilization® IV and the expans
 The source code in this repository (excluding third-party code) was written from scratch, based on publicly available information and observed behavior for interoperability. No decompiled, disassembled, or leaked source code from Civilization IV or its expansions was used.
 
 -------
-
 ## The Project
 
 ### What is this all about?
@@ -42,7 +40,7 @@ Is there a more fitting name to use as a working title to describe a tile-based 
 
 * Also Tessera/Tessara means "four" [Wiktionary](https://en.wiktionary.org/wiki/tessera-#English) in old-greek... this must be destiny!
 
-### Some more inspiration
+### Some more inspiration:
 * [Civilization IV: Prototyping](https://www.youtube.com/watch?v=QTM7TT7bOUk)
 
 * [Play Early, Play Often: Prototyping Civilization 4 (GDC 2006)](https://www.youtube.com/watch?v=y7AV3tNYd5g)
@@ -52,7 +50,6 @@ Is there a more fitting name to use as a working title to describe a tile-based 
 * [DESIGNER NOTES - Soren Johnson's Game Design Journal](https://www.designer-notes.com/category/civ/)
 
 -------
-
 ## Getting Started (Windows-only)(developers-only)
 
 These instructions will get you a copy of the project up and running on your local machine for development and testing purposes.
@@ -65,12 +62,12 @@ These instructions will get you a copy of the project up and running on your loc
 
 * Download and install Visual Studio 2022 (Community): https://visualstudio.microsoft.com/de/vs/
 
-	○ During installation - choose "Desktop development with C++" from workloads
+	* During installation - choose "Desktop development with C++" from workloads
 
 * Download and install Python: https://www.python.org/downloads/
 
-	○ During installation - add Python to PATH option 
-	○ Once installed - use the following command via Python console: py -m pip install -U pip scons
+	* During installation - add Python to PATH option 
+	* Once installed - use the following command via Python console: py -m pip install -U pip scons
 
 ### Installing
 
@@ -78,9 +75,9 @@ A step by step set of instructions that tell you how to get a development env ru
 
 * Start "Git CMD":
 
-	○ cd [YourDesiredFolder]
-	○ git clone https://github.com/Chrischn/Project-Tessera.git
-	○ git submodule update --init --recursive
+	* cd [YourDesiredFolder]
+	* git clone https://github.com/Chrischn/Project-Tessera.git
+	* git submodule update --init --recursive
 
 
 * Go to folder Project-Tessera/external/niflib and start "build_static.bat". 
@@ -88,8 +85,8 @@ A step by step set of instructions that tell you how to get a development env ru
 
 * Start Developer Command Prompt for VS 2022 and use these commands:
 
-	○ cd [Project-Tessera Location]
-	○ scons platform=windows custom_api_file="extension_api.json" target=template_debug debug_symbols=yes debug_crt=yes
+	* cd [Project-Tessera Location]
+	* scons platform=windows custom_api_file="extension_api.json" target=template_debug debug_symbols=yes debug_crt=yes
 
 
 * Open project.godot with "Godot_v4.5-stable_win64_console.exe"
@@ -102,23 +99,25 @@ A step by step set of instructions that tell you how to get a development env ru
 
 * Enjoy!
 
-
-## Contributing
 -------
+## Contributing
+
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on the process for submitting pull requests to the project or how to help out [WORK IN PGORESS].
 
 ## Versioning
--------
+
 [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/Chrischn/Project-Tessera/tags). 
 
-## Authors
 -------
+## Authors
+
 * **Chrischn89** - *Initial work* - [Chrischn](https://github.com/Chrischn)
 
 See also the list of [contributors](https://github.com/Chrischn/Project-Tessera/graphs/contributors) who participated in this project.
 
-## License
 -------
+## License
+
 * Project code: 
 
 This program is licensed under GPL version 3.0. See [LICENSE.md](LICENSE.md) for the full text.
@@ -131,10 +130,11 @@ Godot Engine is licensed under the MIT License. See the included Godot license f
 
 See [NOTICE.md](NOTICE.md) for a list of bundled dependencies and their licenses.
 
-## Acknowledgments
 -------
+## Acknowledgments
+
 * Soren Johnson [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-soren-johnson-design-director/)
 * Dorian Newcomb [MobyGames](https://www.mobygames.com/person/50573/dorian-newcomb/)
 * Blake00 [CivFanatics](https://forums.civfanatics.com/members/blake00.284327/)
 * snowern [CivFanatics](https://forums.civfanatics.com/members/snowern.304450/)
-* Your name could be here!
+* *Your name could be here!*
