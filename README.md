@@ -32,13 +32,15 @@ I've wished for a modern Civ 4 release in 64-bit for ages, probably just like ma
 
 ### Why is it called "Project Tessera"?
 
-* To cite the legend himself, Soren Johnson, Lead Designer & AI Programmer of Civilization 4: ["Civilization is a Tile-Based game. That's the fundamental feature of the game."](https://www.youtube.com/watch?v=y7AV3tNYd5g&t=2533s)
-Great, but what's that got to do with "Tessera"?
+* To cite the legend himself, Soren Johnson, Lead Designer & AI Programmer of Civilization 4: "Civilization is a [Tile-Based game](https://www.youtube.com/watch?v=y7AV3tNYd5g&t=2533s). That's the fundamental feature of the game."
 
-* Tessera [Wikipedia](https://en.wikipedia.org/wiki/Tessera): "A tessera (plural: tesserae, diminutive tessella) is an individual tile, usually formed in the shape of a square, used in creating a mosaic."
-Is there a more fitting name to use as a working title to describe a tile-based historic game?
+Great! But what's that got to do with the word "Tessera"!?
 
-* Also Tessera/Tessara means "four" [Wiktionary](https://en.wiktionary.org/wiki/tessera-#English) in old-greek... this must be destiny!
+* [Wikipedia](https://en.wikipedia.org/wiki/Tessera): *"A tessera (plural: tesserae, diminutive tessella) is an individual tile, usually formed in the shape of a square, used in creating a mosaic."*
+
+Is there a more fitting name to use as a working title to describe a tile-based historic game??
+
+* Also: Tessera/Tessara means "four" [Wiktionary](https://en.wiktionary.org/wiki/tessera-#English) in old-greek... it must be destiny!
 
 ### Some more inspiration:
 * [Civilization IV: Prototyping](https://www.youtube.com/watch?v=QTM7TT7bOUk)
@@ -93,7 +95,7 @@ A step by step set of instructions that tell you how to get a development env ru
 
 * Press Play Button top-right
 
-* Select your Civ4BeyondSword.exe once prompted (only required at the first start)
+* Select your **Civ4BeyondSword.exe** once prompted (only required at the first start)
 
 * Select "Single Player > Play Now!"
 
@@ -106,7 +108,7 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on the process for su
 
 ## Versioning
 
-[SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/Chrischn/Project-Tessera/tags). 
+[SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/Chrischn/Project-Tessera/tags) [WORK IN PGORESS]. 
 
 -------
 ## Authors
@@ -120,15 +122,15 @@ See also the list of [contributors](https://github.com/Chrischn/Project-Tessera/
 
 * Project code: 
 
-This program is licensed under GPL version 3.0. See [LICENSE.md](LICENSE.md) for the full text.
+	* This program is licensed under GPL version 3.0. See [LICENSE.md](LICENSE.md) for the full text.
 
 * Game engine: 
 
-Godot Engine is licensed under the MIT License. See the included Godot license for details.
+	* Godot Engine is licensed under the MIT License. See the included Godot license for details.
 
 * Third-party components: 
 
-See [NOTICE.md](NOTICE.md) for a list of bundled dependencies and their licenses.
+	* See [NOTICE.md](NOTICE.md) for a list of bundled dependencies and their licenses.
 
 -------
 ## Acknowledgments
