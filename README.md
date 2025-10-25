@@ -2,7 +2,7 @@
 [![GitHub license](https://img.shields.io/github/license/Chrischn/Project-Tessera?style=flat-square)](https://github.com/Chrischn/Project-Tessera/LICENSE.md)
 -------
 
-A prototype for an independent, open-source re-implementation of the runtime engine for the 2005 game “Sid Meier’s Civilization® IV” and its expansions “Warlords” and “Beyond the Sword”, powered by the Godot game engine.
+A prototype for an independent, open-source implementation of a runtime engine for mods for the 2005 game “Sid Meier’s Civilization® IV” and its expansions “Warlords” and “Beyond the Sword”, powered by the Godot game engine.
 
 Status: `prototype / work in progress`
 
@@ -31,11 +31,13 @@ I've wished for a modern Civ 4 release in 64-bit for ages, just like many of you
 
 The 25th of October 2025 marks the 20th anniversary of Civ 4's original release with no official remaster in sight and that's why it's about time to take things into our own hands if we ever want to see it happen! Inspired by [Blake00](https://forums.civfanatics.com/threads/rebuilding-parts-of-civ4-multithreading-64bit-memory-access-to-increase-civ4s-speed-in-large-games.688441/)'s initial thread in the CivFanatics Forums and [snowern](https://forums.civfanatics.com/threads/mini-engine-progress.691873/)'s 64-bit Mini-Engine and despite my lack of a professional software engineering background, I decided to kick things off! 
 
-So to anwser the question: I want this project to be the starting point of a community-driven effort to build upon a modern engine, namely Godot, to play mods created for Civilization IV with support for 64bit. We have all the mosaic tiles, we just need to put them together!
+*So to anwser the question*: I want this project to be the starting point for a community-driven effort to build a modern implementation of a runtime engine (based on Godot) that can play mods created for Civilization IV and its expansions with 64bit-support. 
+
+We have all the mosaic tiles, we just need to put them together!
 
 ### Why is it called "Project Tessera"?
 
-* To cite the legend himself, **Soren Johnson**, Lead Designer & AI Programmer of Civilization 4: *"Civilization is a [Tile-Based game](https://www.youtube.com/watch?v=y7AV3tNYd5g&t=2533s). That's the fundamental feature of the game."*
+* To cite the legend himself, **Soren Johnson**, Lead Designer & AI Programmer of Civilization IV: *"Civilization is a [Tile-Based game](https://www.youtube.com/watch?v=y7AV3tNYd5g&t=2533s). That's the fundamental feature of the game."*
 
 	Great! But what's that got to do with the word "Tessera"!?
 
@@ -71,9 +73,11 @@ So to anwser the question: I want this project to be the starting point of a com
 
 * Rework the build pipe (Scons -> CMake?)
 
+* Add option for development on Linux
+
 * Plan out the integration of CvGameCoreDLL -> what about compability with saves and mods?
 
-* Create basic landscape drawing in 3D world
+* Create basic landscape drawing in 3D world (Godot GridMap? https://docs.godotengine.org/en/stable/tutorials/3d/using_gridmaps.html)
 
 * XML Import (requires CvGameCoreDLL?)
 
@@ -98,23 +102,26 @@ These instructions will get you a copy of the project up and running on your loc
 * Download and install Python: https://www.python.org/downloads/
 
 	* During installation - add `Python to PATH option`
-	* Once installed - use the following command via Python console: `py -m pip install -U pip scons`
 
 ### Installing
 
 A step by step set of instructions that tell you how to get a development env running:
 
-* Start "Git CMD":
+* (For installing Scons) Start "CMD":
+
+	* `py -m pip install -U pip scons`
+
+* (For initializing the Git repos) Start "Git CMD":
 
 	* `cd [YourDesiredFolder]`
 	* `git clone https://github.com/Chrischn/Project-Tessera.git`
 	* `git submodule update --init --recursive`
 
 
-* Go to folder Project-Tessera/external/niflib and start "build_static.bat". 
+* (For manually building the static niflib library) Go to folder Project-Tessera/external/niflib and start "build_static.bat". 
 
 
-* Start Developer Command Prompt for VS 2022 and use these commands:
+* (For building the project for use in Godot Editor) Start Developer Command Prompt for VS 2022 and use these commands:
 
 	* `cd [Project-Tessera Location]`
 	* `scons platform=windows custom_api_file="extension_api.json" target=template_debug debug_symbols=yes debug_crt=yes`
