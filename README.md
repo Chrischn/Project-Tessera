@@ -41,9 +41,9 @@ We have all the mosaic tiles, we just need to put them together!
 
 	Great! But what's that got to do with the word "Tessera"!?
 
-* [Wikipedia](https://en.wikipedia.org/wiki/Tessera): *"A tessera (plural: tesserae, diminutive tessella) is an individual tile, usually formed in the shape of a square, used in creating a mosaic."*
+* [Wikipedia](https://en.wikipedia.org/wiki/Tessera): *"A tessera (plural: tesserae, diminutive tessella) is an individual **tile**, usually formed in the shape of a square, used in creating a mosaic."*
 
-	Is there a more fitting name to be used as a working title to describe a tile-based historic game??
+	Is there a more fitting name for a working title to describe a tile-based, historic game??
 
 * Still not convinvced? "Tessera/Tessara" means ["FOUR"](https://en.wiktionary.org/wiki/tessera-#English) in old-greek... *it's meant to be!*
 
@@ -57,7 +57,7 @@ We have all the mosaic tiles, we just need to put them together!
 * [DESIGNER NOTES - Soren Johnson's Game Design Journal](https://www.designer-notes.com/category/civ/)
 
 -------
-## Current Status / Goals (last updated: 2025-10-12)
+## Current Status / Goals (last updated: 2025-10-25)
 
 ### Status
 * Verification of the original .exe file works
@@ -131,7 +131,7 @@ A step by step set of instructions that tell you how to get a development env ru
 
 * Press Play Button top-right
 
-* Select your **Civ4BeyondSword.exe** once prompted (only required at the first start)
+* Select your **Civ4BeyondSword.exe** once prompted (only required on the first start)
 
 * Select "Single Player > Play Now!"
 
@@ -140,11 +140,11 @@ A step by step set of instructions that tell you how to get a development env ru
 -------
 ## Contributing
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on the process for submitting pull requests to the project or how to help out [WORK IN PGORESS].
+[WORK IN PGORESS] Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on the process for submitting pull requests to the project or how to help out.
 
 ## Versioning
 
-[SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/Chrischn/Project-Tessera/tags) [WORK IN PGORESS]. 
+[WORK IN PGORESS] [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/Chrischn/Project-Tessera/tags). 
 
 -------
 ## Authors
@@ -172,6 +172,7 @@ See also the list of [contributors](https://github.com/Chrischn/Project-Tessera/
 
 -------
 ## Acknowledgments
+A big THANK YOU to all these amazing people, who inspired all of this:
 
 * Soren Johnson - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-soren-johnson-design-director/)
 * Dale Kent - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-dale-kent-daniels-umanovskis/)
