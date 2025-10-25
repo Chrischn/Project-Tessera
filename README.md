@@ -71,7 +71,7 @@ We have all the mosaic tiles, we just need to put them together!
 Summary: In its current state it's possible to load a .nif file in 3D and see it's mesh model.
 
 ### Goals
-* Rework the build pipe (Scons -> CMake?)
+* Rework the build pipe (Scons -> CMake)
 
 * Add option for development on Linux
 
