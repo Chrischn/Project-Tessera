@@ -35,14 +35,15 @@
 using namespace godot;
 using namespace Niflib;
 
-//Binds functions for use from inside Godot Editor. Hint: not every function needs to be bound 
+//Binds functions for use from inside Godot Editor. First parameter is the name of the function as it is going to appear in Godot and the last parameter is the name of the corresponding C++ function. Hint: not every function needs to be bound!
 void GdextNiflib::_bind_methods() {
     ClassDB::bind_method(D_METHOD("ping"), &GdextNiflib::ping);
     ClassDB::bind_method(D_METHOD("get_nif_version", "file_path"), &GdextNiflib::get_nif_version_as_string);
     ClassDB::bind_method(D_METHOD("get_nif_header_info", "file_path"), &GdextNiflib::get_nif_header_info);
     ClassDB::bind_method(D_METHOD("get_nif_header", "file_path"), &GdextNiflib::get_nif_header);
     ClassDB::bind_method(D_METHOD("check_nif_version_code", "version_code"), &GdextNiflib::isValidNIFVersion);
-    ClassDB::bind_method(D_METHOD("load_nif_scene", "file_path", "root"), &GdextNiflib::load_nif_scene);
+    ClassDB::bind_method(D_METHOD("load_nif_scene", "file_path", "godotnode"), &GdextNiflib::load_nif_scene);
+    ClassDB::bind_method(D_METHOD("load_nif_scene_from_PackedByteArray", "file_stream", "godotnode"), &GdextNiflib::load_nif_scene_from_PackedByteArray);
 }
 
 // Check if GDExtension is working correctly
@@ -195,6 +196,32 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode) {
         }
 
     } catch (const std::exception& e) {
+        UtilityFunctions::print("Error loading NIF: ", e.what());
+    }
+}
+
+// Receives a PackedByteArray of a .nif file that needs converting to Godot nodes.       NIFLIB_API Ref<NiObject> ReadNifTree( istream & in, NifInfo * info = NULL );
+// Receives a Godot Node* pointer to an already existing Godot Node to enable the retrieval of data from Godot or to attach new Nodes to it.
+void GdextNiflib::load_nif_scene_from_PackedByteArray(const PackedByteArray& file_stream, Node3D* godotnode) {
+    try {
+        std::string buffer(reinterpret_cast<const char*>(file_stream.ptr()), file_stream.size());
+        std::istringstream stream(buffer);
+
+        if (true) {
+            Node3D* custom_nif_node3d_root = memnew(Node3D);
+
+            NiObjectRef ref_root = ReadNifTree(stream);
+
+            if (ref_root != NULL) {
+                rebuild_nif_tree_in_godot(ref_root, godotnode);
+            }
+        }
+        else {
+            throw std::invalid_argument("Err loading NIF: file invalid!");
+        }
+
+    }
+    catch (const std::exception& e) {
         UtilityFunctions::print("Error loading NIF: ", e.what());
     }
 }

@@ -909,6 +909,7 @@ enum class NiType {
     Dictionary get_nif_header(const String& file_path) const;
     bool isValidNIFVersion(unsigned int version_code) const;
     void load_nif_scene(const String& file_path, Node3D* godotnode);
+    void load_nif_scene_from_PackedByteArray(const PackedByteArray& file_stream, Node3D* godotnode);
     Node* convert_nif_node_to_godot(Niflib::NiObjectRef current_node, Node* parent);
     void rebuild_nif_tree_in_godot(Niflib::NiObjectRef current_node, Node* parent);
     GdextNiflib::NiType stringToNiType(const std::string& str);

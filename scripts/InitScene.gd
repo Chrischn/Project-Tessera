@@ -41,7 +41,28 @@ func _ready() -> void:
 	#print(Global.assets0)
 	#print(Global.assets0["spy.kfm"].hex_encode())
 	#print(Global.assets1["civtitle.dds"].hex_encode())
-	#print(Global.assets3["maceman_md_fidget.kf"].hex_encode())
+	#print(Global.assets3["maceman/maceman_md_fidget.kf"].hex_encode())
+	#print(Global.assets0["spy.kfm"].hex_encode())
+	
+	# Open output text-file to store debug information
+	var fpk_debug_file := FileAccess.open("res://debug/fpk_debug.txt", FileAccess.WRITE)
+	if fpk_debug_file:
+		var dict = Global.assets3
+		var keys = dict.keys()
+		for i in range(keys.size()):
+			var key = keys[i]
+			var value = dict[key]
+			#fpk_debug_file.store_line("%s: %s" % [str(key), str(value)])
+			fpk_debug_file.store_line("%s" % [str(key)])
+		fpk_debug_file.close()
+	else:
+		push_error("Failed to open signature output file.")
+		
+	#print(Global.assets3["railroads\\railroadd15.nif"].hex_encode())
+	
+	#var apc : PackedByteArray = Global.assets3["conquistador\\conquistador_freeze1000.nif"]
+	#print(typeof(apc))
+	
 	
 	await get_tree().create_timer(0.1).timeout
 	find_child("ProgressText").text = "Init Check XML"
