@@ -69,19 +69,19 @@ We have all the mosaic tiles, we just need to put them together!
 * Loading of .nif files works (only meshes are drawn in 3D for now)
 
 ### Goals
-* Continue development of .nif file import function and translation to Godot nodes
-
 * Rework the build pipe (Scons -> CMake?)
 
 * Add option for development on Linux
+
+* Continue development of .nif file import function and translation to Godot nodes
 
 * Plan out the integration of CvGameCoreDLL -> what about compability with saves and mods?
 
 * Create basic landscape drawing in 3D world (Godot GridMap? https://docs.godotengine.org/en/stable/tutorials/3d/using_gridmaps.html)
 
-* XML Import (requires CvGameCoreDLL?)
+* XML config loading (requires CvGameCoreDLL?)
 
-* GUI theme import (requires CvGameCoreDLL?)
+* GUI theme config loading (requires CvGameCoreDLL?)
 
 
 -------
@@ -174,8 +174,8 @@ See also the list of [contributors](https://github.com/Chrischn/Project-Tessera/
 ## Acknowledgments
 A big THANK YOU to all these amazing people, who inspired all of this:
 
-* Soren Johnson - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-soren-johnson-design-director/) [MobyGames page](https://www.mobygames.com/person/50568/soren-johnson/)
-* Dorian Newcomb - [Redacted Initiative](https://www.redactedinitiative.com/) [MobyGames page](https://www.mobygames.com/person/50573/dorian-newcomb/)
+* Soren Johnson - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-soren-johnson-design-director/) - [MobyGames page](https://www.mobygames.com/person/50568/soren-johnson/)
+* Dorian Newcomb - [Redacted Initiative](https://www.redactedinitiative.com/) - [MobyGames page](https://www.mobygames.com/person/50573/dorian-newcomb/)
 * Dale Kent - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-dale-kent-daniels-umanovskis/)
 * Blake00 - [CivFanatics page](https://forums.civfanatics.com/members/blake00.284327/)
 * snowern - [CivFanatics page](https://forums.civfanatics.com/members/snowern.304450/)
