@@ -27,11 +27,11 @@ The source code in this repository (excluding third-party code) was written from
 # The Project
 
 ### What is this all about?
-I've wished for a modern Civ 4 release in 64-bit for ages, just like many of you probably did/do too. The modability of Civ 4 is unmatched in the series but the constant crashes and the long loading times when playing with some of the amazing mods out there are caused by a 32-bit technical barrier, that can only partially be worked around, without changes to the underlying engine. 
+I've wished for a modern Civ 4 release in 64-bit for ages, just like many of you probably did/do too. The moddability of Civ 4 is unmatched in the series but the constant crashes and the long loading times when playing with some of the amazing mods out there are caused by a 32-bit technical barrier, that can only partially be worked around, without changes to the underlying engine. 
 
 The 25th of October 2025 marks the 20th anniversary of Civ 4's original release with no official remaster in sight and that's why it's about time to take things into our own hands if we ever want to see it happen! Inspired by [Blake00](https://forums.civfanatics.com/threads/rebuilding-parts-of-civ4-multithreading-64bit-memory-access-to-increase-civ4s-speed-in-large-games.688441/)'s initial thread in the CivFanatics Forums and [snowern](https://forums.civfanatics.com/threads/mini-engine-progress.691873/)'s 64-bit Mini-Engine and despite my lack of a professional software engineering background, I decided to kick things off! 
 
-*So to anwser the question*: I want this project to be the starting point for a community-driven effort to build a modern implementation of a runtime engine (based on Godot) that can play mods created for Civilization IV and its expansions with 64bit-support. 
+*So to answer the question*: I want this project to be the starting point for a community-driven effort to build a modern implementation of a runtime engine (based on Godot) that can play mods created for Civilization IV and its expansions with 64bit-support. 
 
 We have all the mosaic tiles, we just need to put them together!
 
@@ -77,7 +77,7 @@ Summary: In its current state it's possible to load a .nif file in 3D and see it
 
 * Continue development of .nif file import function and translation to Godot nodes
 
-* Plan out the integration of CvGameCoreDLL -> what about compability with saves and mods?
+* Plan out the integration of CvGameCoreDLL -> what about compatibility with saves and mods?
 
 * Create basic landscape drawing in 3D world (Godot GridMap? https://docs.godotengine.org/en/stable/tutorials/3d/using_gridmaps.html)
 
@@ -142,11 +142,11 @@ A step by step set of instructions that tell you how to get a development env ru
 -------
 ## Contributing
 
-[WORK IN PGORESS] Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on the process for submitting pull requests to the project or how to help out.
+[WORK IN PROGRESS] Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on the process for submitting pull requests to the project or how to help out.
 
 ## Versioning
 
-[WORK IN PGORESS] [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/Chrischn/Project-Tessera/tags). 
+[WORK IN PROGRESS] [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/Chrischn/Project-Tessera/tags). 
 
 -------
 ## Authors
