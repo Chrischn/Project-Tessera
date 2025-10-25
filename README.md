@@ -174,9 +174,9 @@ See also the list of [contributors](https://github.com/Chrischn/Project-Tessera/
 ## Acknowledgments
 A big THANK YOU to all these amazing people, who inspired all of this:
 
-* Soren Johnson - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-soren-johnson-design-director/)
+* Soren Johnson - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-soren-johnson-design-director/) [MobyGames page](https://www.mobygames.com/person/50568/soren-johnson/)
+* Dorian Newcomb - [Redacted Initiative](https://www.redactedinitiative.com/) [MobyGames page](https://www.mobygames.com/person/50573/dorian-newcomb/)
 * Dale Kent - [Mohawk Games](https://mohawkgames.com/podcasts/interview-with-dale-kent-daniels-umanovskis/)
-* Dorian Newcomb - [MobyGames](https://www.mobygames.com/person/50573/dorian-newcomb/)
 * Blake00 - [CivFanatics page](https://forums.civfanatics.com/members/blake00.284327/)
 * snowern - [CivFanatics page](https://forums.civfanatics.com/members/snowern.304450/)
 * Nightinggale - [CivFanatics page](https://forums.civfanatics.com/members/nightinggale.158038/)
