@@ -57,7 +57,7 @@ We have all the mosaic tiles, we just need to put them together!
 * [DESIGNER NOTES - Soren Johnson's Game Design Journal](https://www.designer-notes.com/category/civ/)
 
 -------
-## Current Status / Goals (last updated: 2025-10-25)
+## Current Status / Goals (last updated: 2026-03-07)
 
 ### Status
 * Verification of the original .exe file works
@@ -68,11 +68,11 @@ We have all the mosaic tiles, we just need to put them together!
 
 * Loading of .nif files works (only meshes are drawn in 3D for now)
 
-Summary: In its current state it's possible to load a .nif file in 3D and see it's mesh model.
+* Build system migrated from SCons to CMake (unified build for godot-cpp + niflib + extension)
+
+Summary: In its current state it's possible to load a .nif file in 3D and see its mesh model.
 
 ### Goals
-* Rework the build pipe (Scons -> CMake)
-
 * Add option for development on Linux
 
 * Continue development of .nif file import function and translation to Godot nodes
@@ -103,15 +103,13 @@ These instructions will get you a copy of the project up and running on your loc
 
 * Download and install Python: https://www.python.org/downloads/
 
-	* During installation - add `Python to PATH option`
+	* During installation - enable the `Add Python to PATH` option
+
+* Download and install CMake: https://cmake.org/download/
 
 ### Installing
 
 A step by step set of instructions that tell you how to get a development env running:
-
-* (For installing Scons) Start "CMD":
-
-	* `py -m pip install -U pip scons`
 
 * (For initializing the Git repos) Start "Git CMD":
 
@@ -120,13 +118,11 @@ A step by step set of instructions that tell you how to get a development env ru
 	* `git submodule update --init --recursive`
 
 
-* (For manually building the static niflib library) Go to folder Project-Tessera/external/niflib and start "build_static.bat". 
-
-
 * (For building the project for use in Godot Editor) Start Developer Command Prompt for VS 2022 and use these commands:
 
 	* `cd [Project-Tessera Location]`
-	* `scons platform=windows custom_api_file="extension_api.json" target=template_debug debug_symbols=yes debug_crt=yes`
+	* `cmake -B build -G "Visual Studio 17 2022" -A x64`  *(configure — run once, or after CMakeLists.txt changes)*
+	* `cmake --build build --config Debug`
 
 
 * Open project.godot with "Godot_v4.5-stable_win64_console.exe"

@@ -30,7 +30,8 @@ func _ready() -> void:
 	#var path_to_niffile : String = base_path.path_join("Assets/Art/Terrain/Routes/Roads/roada00.nif")
 	#var path_to_niffile : String = base_path.path_join("Assets/Art/Structures/Buildings/Forge/forge.nif")
 	#var path_to_niffile : String = base_path.path_join("Assets/Art/Structures/Buildings/Castle/castle.nif")
-	var path_to_niffile : String = base_path.path_join("Assets/Art/Units/Galley/galley_freeze1000.nif")
+	#var path_to_niffile : String = base_path.path_join("Assets/Art/Units/Galley/galley_freeze1000.nif")
+	var path_to_niffile : String = base_path.path_join("Assets/Art/Units/Submarine/Submarine.nif")
 	print(path_to_niffile)
 	
 	#print(niflib.ping())  # -> "gdext_niflib OK"
