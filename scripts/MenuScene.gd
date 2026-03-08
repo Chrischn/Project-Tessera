@@ -37,8 +37,8 @@ func init_MenuScene() -> void:
 	#find_child("TextureRect_Ref1042x786").texture = ImageTexture.create_from_image(Image.load_from_file("E:/Programming/Documentation/Civ4_Reference/TextureRect_Reference/2025-07-24 03_09_28-Civilization IV.png"))	# Load Screenshot as reference for GUI creation
 	#find_child("TextureRect_Ref1920x1080").texture = ImageTexture.create_from_image(Image.load_from_file("E:/Programming/Documentation/Civ4_Reference/TextureRect_Reference/2025-07-24 10_51_33-Greenshot.png"))	# Load Screenshot as reference for GUI creation
 	
-	find_child("MenuBackground").texture = ImageTextureUtil.load_dds_from_buffer(Global.assets3["main menu\\stars.dds"])	# Load main menu background
-	#find_child("Logo").texture = ImageTextureUtil.load_dds_from_buffer(Global.assets1["main menu\\civtitle.dds"])	# Load main menu logo
+	find_child("MenuBackground").texture = ImageTextureUtil.load_dds_from_buffer(VFS.get_file_data("art/interface/main menu/stars.dds"))	# Load main menu background
+	#find_child("Logo").texture = ImageTextureUtil.load_dds_from_buffer(VFS.get_file_data("art/interface/main menu/civtitle.dds"))	# Load main menu logo
 	#find_child("Logo").texture = ImageTextureUtil.load_texture_from_file((Global.load_value_from_config("GAME","original_folder_path")).path_join("Resource/Temp/select_c.tga"))
 	
 	find_child("Logo").texture = load("res://assets/logos/Project_Tessera_Logo.svg")

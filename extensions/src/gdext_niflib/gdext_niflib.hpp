@@ -17,6 +17,7 @@
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/engine.hpp>
 
 //Standard Library
 #include <string>

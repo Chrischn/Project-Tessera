@@ -1,17 +1,40 @@
-[gd_scene load_steps=3 format=3 uid="uid://chwsce5darvty"]
+[gd_scene load_steps=4 format=3 uid="uid://chwsce5darvty"]
 
 [ext_resource type="Script" uid="uid://cp524vky5x2jo" path="res://scripts/GameWorldScene.gd" id="1_xlnkm"]
 [ext_resource type="Script" uid="uid://c5ffua0yrvqft" path="res://scripts/PlayerPivot.gd" id="2_bel4h"]
+
+[sub_resource type="Environment" id="Environment_abc01"]
+background_mode = 1
+background_color = Color(0.3, 0.35, 0.45, 1)
+ambient_light_source = 1
+ambient_light_color = Color(0.6, 0.6, 0.65, 1)
+ambient_light_energy = 2.0
 
 [node name="GameWorld" type="Node3D"]
 script = ExtResource("1_xlnkm")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_abc01")
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.16626, 88.6427, 0.363083)
-light_energy = 2.0
-light_indirect_energy = 2.0
+[node name="Light_Top" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 100, 0)
+light_energy = 0.6
+
+[node name="Light_Front" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 100)
+light_energy = 0.4
+
+[node name="Light_Back" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, -100)
+light_energy = 0.4
+
+[node name="Light_Left" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -100, 0, 0)
+light_energy = 0.4
+
+[node name="Light_Right" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 100, 0, 0)
+light_energy = 0.4
 
 [node name="PlayerPivot" type="Node3D" parent="." node_paths=PackedStringArray("cam")]
 script = ExtResource("2_bel4h")

@@ -21,6 +21,7 @@ config/icon="uid://bm2whnj0m051b"
 [autoload]
 
 Global="*res://scripts/Global.gd"
+VFS="*res://scripts/VFS.gd"
 
 [display]
 

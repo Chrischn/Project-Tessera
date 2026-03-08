@@ -42,7 +42,8 @@ static godot::Vector3 nif_to_godot_vec3(const Niflib::Vector3& v) {
     return godot::Vector3(v.x, v.z, -v.y);
 }
 
-// Loads a DDS texture from disk, with caching.
+// Loads a DDS texture via VFS (FPK archives + loose files), with caching.
+// Falls back to direct disk search if VFS is unavailable.
 godot::Ref<ImageTexture> GdextNiflib::load_dds_texture(
     const String& base_path, const std::string& nif_tex_path)
 {
@@ -55,26 +56,43 @@ godot::Ref<ImageTexture> GdextNiflib::load_dds_texture(
     std::replace(tex_path.begin(), tex_path.end(), '\\', '/');
     String rel_path = String::utf8(tex_path.c_str());
 
-    // Search order: NIF's own directory, base_path/Assets/path, base_path/path
     godot::Ref<Image> img;
     img.instantiate();
-
-    // Extract just the filename for directory-based lookups
-    String rel_filename = rel_path.get_file();
-
-    // Build search paths
-    std::vector<String> search_paths;
-    if (!current_nif_dir.is_empty()) {
-        search_paths.push_back(current_nif_dir.path_join(rel_filename));
-    }
-    search_paths.push_back(base_path.path_join("Assets").path_join(rel_path));
-    search_paths.push_back(base_path.path_join(rel_path));
-
     Error err = ERR_FILE_NOT_FOUND;
-    for (const auto& path : search_paths) {
-        UtilityFunctions::print("[TEX] Trying: ", path);
-        err = img->load(path);
-        if (err == OK) break;
+
+    // --- Try VFS first (resolves both loose files and FPK archives) ---
+    // Uses VFS.load_image_texture() which goes through ResourceLoader -- required for Civ IV DDS.
+    Object* vfs = Engine::get_singleton()->get_singleton("VFS");
+    if (vfs != nullptr) {
+        Variant tex_variant = vfs->call("load_image_texture", rel_path);
+        if (tex_variant.get_type() == Variant::OBJECT) {
+            Object* obj = tex_variant;
+            if (obj != nullptr) {
+                Ref<ImageTexture> tex(Object::cast_to<ImageTexture>(obj));
+                if (tex.is_valid()) {
+                    texture_cache[nif_tex_path] = tex;
+                    UtilityFunctions::print("[TEX] VFS loaded: ", rel_path);
+                    return tex;
+                }
+            }
+        }
+    }
+
+    // --- Fallback: direct disk search (if VFS unavailable or file not found) ---
+    if (err != OK) {
+        String rel_filename = rel_path.get_file();
+        std::vector<String> search_paths;
+        if (!current_nif_dir.is_empty()) {
+            search_paths.push_back(current_nif_dir.path_join(rel_filename));
+        }
+        search_paths.push_back(base_path.path_join("Assets").path_join(rel_path));
+        search_paths.push_back(base_path.path_join(rel_path));
+
+        for (const auto& path : search_paths) {
+            UtilityFunctions::print("[TEX] Fallback trying: ", path);
+            err = img->load(path);
+            if (err == OK) break;
+        }
     }
 
     if (err != OK) {
@@ -331,6 +349,8 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
         // Diffuse color + alpha
         Niflib::Color3 diff = mat_prop->GetDiffuseColor();
         float alpha = mat_prop->GetTransparency();  // 1.0 = opaque
+        UtilityFunctions::print("[MAT] diffuse=(", diff.r, ",", diff.g, ",", diff.b,
+            ") alpha=", alpha);
         mat->set_albedo(godot::Color(diff.r, diff.g, diff.b, alpha));
 
         // Emissive
@@ -360,41 +380,55 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
 
     // Phase 4: Textures from NiTexturingProperty
     if (tex_prop != NULL) {
-        UtilityFunctions::print("[TEX] NiTexturingProperty found, texture count check...");
-        // BASE_MAP (slot 0) -> albedo texture
-        if (tex_prop->HasTexture(0)) {
+        // Dump all texture slots for debugging
+        const char* slot_names[] = {"BASE_MAP","DARK_MAP","DETAIL_MAP","GLOSS_MAP",
+            "GLOW_MAP","BUMP_MAP","NORMAL_MAP","UNKNOWN2","DECAL_0","DECAL_1","DECAL_2","DECAL_3"};
+        for (int s = 0; s < 12; ++s) {
+            if (tex_prop->HasTexture(s)) {
+                TexDesc td = tex_prop->GetTexture(s);
+                String fname = (td.source != NULL && td.source->IsTextureExternal())
+                    ? String::utf8(td.source->GetTextureFileName().c_str()) : String("(internal)");
+                UtilityFunctions::print("[TEX] slot ", s, " (", slot_names[s], "): ", fname);
+            }
+        }
+
+        // Albedo texture priority: DECAL_0 (8) if BASE_MAP is TeamColor, else BASE_MAP (0) > DETAIL_MAP (2) > DECAL_0 (8)
+        // Civ IV character models use TeamColor.bmp in BASE_MAP (team color mask) + actual texture in DECAL_0.
+        // When TeamColor is detected in BASE_MAP and DECAL_0 exists, skip BASE_MAP.
+        bool skip_base_map = false;
+        if (tex_prop->HasTexture(0) && tex_prop->HasTexture(8)) {
             TexDesc base_desc = tex_prop->GetTexture(0);
-            UtilityFunctions::print("[TEX] BASE_MAP source is ",
-                (base_desc.source != NULL ? "valid" : "null"));
-            if (base_desc.source != NULL) {
-                UtilityFunctions::print("[TEX] IsExternal=",
-                    base_desc.source->IsTextureExternal() ? "true" : "false",
-                    " FileName=",
-                    String::utf8(base_desc.source->GetTextureFileName().c_str()));
-            }
             if (base_desc.source != NULL && base_desc.source->IsTextureExternal()) {
-                auto tex = load_dds_texture(base_path, base_desc.source->GetTextureFileName());
-                if (tex.is_valid()) {
-                    mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, tex);
-                    UtilityFunctions::print("[TEX] Albedo texture loaded successfully");
-                } else {
-                    UtilityFunctions::print("[TEX] Albedo texture FAILED to load");
-                }
-            }
-        } else {
-            UtilityFunctions::print("[TEX] No BASE_MAP (slot 0)");
-        }
-        // GLOW_MAP (slot 4) -> emission texture
-        if (tex_prop->HasTexture(4)) {
-            TexDesc glow_desc = tex_prop->GetTexture(4);
-            if (glow_desc.source != NULL && glow_desc.source->IsTextureExternal()) {
-                auto tex = load_dds_texture(base_path, glow_desc.source->GetTextureFileName());
-                if (tex.is_valid()) {
-                    mat->set_feature(StandardMaterial3D::FEATURE_EMISSION, true);
-                    mat->set_texture(StandardMaterial3D::TEXTURE_EMISSION, tex);
+                std::string base_name = base_desc.source->GetTextureFileName();
+                std::string base_lower = base_name;
+                std::transform(base_lower.begin(), base_lower.end(), base_lower.begin(), ::tolower);
+                if (base_lower.find("teamcolor") != std::string::npos) {
+                    skip_base_map = true;
+                    UtilityFunctions::print("[TEX] Skipping TeamColor BASE_MAP, using DECAL_0 instead");
                 }
             }
         }
+        int albedo_candidates[] = {0, 2, 8};
+        bool albedo_loaded = false;
+        for (int slot : albedo_candidates) {
+            if (albedo_loaded) break;
+            if (slot == 0 && skip_base_map) continue;
+            if (!tex_prop->HasTexture(slot)) continue;
+            TexDesc albedo_desc = tex_prop->GetTexture(slot);
+            if (albedo_desc.source == NULL || !albedo_desc.source->IsTextureExternal()) continue;
+            auto tex = load_dds_texture(base_path, albedo_desc.source->GetTextureFileName());
+            if (tex.is_valid()) {
+                mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, tex);
+                godot::Color current = mat->get_albedo();
+                mat->set_albedo(godot::Color(1.0f, 1.0f, 1.0f, current.a));
+                UtilityFunctions::print("[TEX] Albedo from slot ", slot, ": ",
+                    String::utf8(albedo_desc.source->GetTextureFileName().c_str()));
+                albedo_loaded = true;
+            }
+        }
+        // GLOW_MAP (slot 4) — skipped.
+        // Civ IV uses this slot for environment/reflection maps, not emission.
+        // TODO: revisit when environment mapping is implemented.
         // BUMP_MAP (slot 5) or NORMAL_MAP (slot 6) -> normal map
         int normal_slot = tex_prop->HasTexture(6) ? 6 : (tex_prop->HasTexture(5) ? 5 : -1);
         if (normal_slot >= 0) {
@@ -415,14 +449,24 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
     if (alpha_prop != NULL) {
         bool blend = alpha_prop->GetBlendState();
         bool test = alpha_prop->GetTestState();
+        unsigned short src_blend = alpha_prop->GetSourceBlendFunc();
+        unsigned short dst_blend = alpha_prop->GetDestBlendFunc();
+        unsigned int threshold = alpha_prop->GetTestThreshold();
 
-        if (blend && test) {
-            mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA_DEPTH_PRE_PASS);
-        } else if (test) {
-            mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
-            mat->set_alpha_scissor_threshold(alpha_prop->GetTestThreshold() / 255.0f);
-        } else if (blend) {
-            mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+        UtilityFunctions::print("[ALPHA] blend=", blend, " test=", test,
+            " src=", src_blend, " dst=", dst_blend, " threshold=", threshold);
+
+        // threshold=0 with blend is typically env map blending in Civ IV, not real transparency
+        if (threshold > 0) {
+            if (blend && test) {
+                mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+                mat->set_alpha_scissor_threshold(threshold / 255.0f);
+            } else if (test) {
+                mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+                mat->set_alpha_scissor_threshold(threshold / 255.0f);
+            } else if (blend) {
+                mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+            }
         }
     }
 
@@ -484,11 +528,11 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
         st->add_vertex(nif_to_godot_vec3(vertices[i]));
     }
 
-    // Triangle indices
+    // Triangle indices (swap v2/v3 to fix winding order after coordinate handedness change)
     for (const auto& tri : triangles) {
         st->add_index(tri.v1);
-        st->add_index(tri.v2);
         st->add_index(tri.v3);
+        st->add_index(tri.v2);
     }
 
     // Generate normals only if the NIF didn't provide them
@@ -558,8 +602,8 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
 
     for (const auto& tri : triangles) {
         st->add_index(tri.v1);
-        st->add_index(tri.v2);
         st->add_index(tri.v3);
+        st->add_index(tri.v2);
     }
 
     if (!has_normals) st->generate_normals();

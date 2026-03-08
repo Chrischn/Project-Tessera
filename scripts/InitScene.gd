@@ -38,10 +38,9 @@ func _ready() -> void:
 	Global.assets1 = FPK_Loader.parse_fpk_archive(base_path.path_join("Assets/Assets1.fpk"))
 	Global.assets2 = FPK_Loader.parse_fpk_archive(base_path.path_join("Assets/Assets2.fpk"))
 	Global.assets3 = FPK_Loader.parse_fpk_archive(base_path.path_join("Assets/Assets3.fpk"))
-	#print(Global.assets0)
-	#print(Global.assets0["spy.kfm"].hex_encode())
-	#print(Global.assets1["civtitle.dds"].hex_encode())
-	#print(Global.assets3["maceman_md_fidget.kf"].hex_encode())
+
+	# Initialize VFS with loaded FPK archives and base path
+	VFS.initialize(base_path, Global.assets0, Global.assets1, Global.assets2, Global.assets3)
 	
 	await get_tree().create_timer(0.1).timeout
 	find_child("ProgressText").text = "Init Check XML"
