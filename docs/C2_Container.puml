@@ -1,0 +1,34 @@
+@startuml C2_Container
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Project Tessera — C2 Container
+
+LAYOUT_WITH_LEGEND()
+
+Person(player,      "Player",      "Plays mods")
+Person(contributor, "Contributor", "Develops the engine")
+
+System_Boundary(tessera, "Project Tessera") {
+    Container(godot_project, "Godot Project",       "Godot 4.5 / GDScript",  "Scene management, UI, 3D world viewport, and asset loading orchestration")
+    Container(gdextension,   "GDExtension Module 'niflib'",  "C++17 / Windows DLL",   "Exposes native NIF mesh loading to GDScript via the GDExtension API. Godot discovers and loads it via the niflib.gdextension manifest.")
+    Container(build_system,  "Build System",        "CMake 3.19+",            "Compiles the GDExtension DLL and generates godot-cpp bindings")
+}
+
+Container_Ext(niflib,     "niflib",      "C++14 / static library",  "Parses the NetImmerse/Gamebryo .nif binary format (NiObject hierarchy). Compiled at C++14 due to C++17 incompatibilities (std::byte conflict).")
+Container_Ext(qhull,      "qhull",       "C static library",  "Convex hull and collision geometry computation; submodule dependency of niflib")
+Container_Ext(godot_cpp,  "godot-cpp",   "C++17 / C++ submodule",  "Godot engine C++ bindings, generated from extension_api.json")
+Container_Ext(civ4_assets,"Civ IV Assets","Binary / XML files", "Read-only game assets: .fpk archives, .nif meshes, XML tables")
+
+Rel(player,        godot_project, "Launches and interacts with")
+Rel(godot_project, gdextension,   "Calls NIF loader via",     "GDExtension API")
+Rel(godot_project, civ4_assets,   "Reads .fpk archives from", "File I/O")
+Rel(gdextension,   niflib,        "Parses .nif files with",         "Static link")
+Rel(gdextension,   godot_cpp,     "Implements GDExtension API with", "Static link")
+Rel(gdextension,   civ4_assets,   "Reads .nif meshes from",         "File I/O")
+Rel(niflib,        qhull,         "Uses for collision geometry",     "Static link")
+Rel(build_system,  gdextension,   "Compiles")
+Rel(build_system,  godot_cpp,     "Builds bindings from",           "extension_api.json")
+Rel(contributor,   build_system,  "Runs")
+
+@enduml
