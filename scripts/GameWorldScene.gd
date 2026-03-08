@@ -49,6 +49,6 @@ func _ready() -> void:
 			#print("Block types: ", full_header.block_types)
 			#print("Copyright: ", full_header.copyright)
 		var game_world := get_tree().current_scene as Node3D
-		niflib.load_nif_scene(path_to_niffile, game_world)
+		niflib.load_nif_scene(path_to_niffile, game_world, base_path)
 	else:
 		push_error("No .nif file found under provided path")
