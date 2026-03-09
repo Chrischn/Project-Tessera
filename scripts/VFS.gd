@@ -217,6 +217,53 @@ func load_image_texture(path: String) -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 
+## Returns all VFS-known paths whose normalized form starts with dir_prefix
+## and ends with the given extension. Searches both FPK index and loose files.
+## dir_prefix should use forward slashes (e.g. "art/units"). Case-insensitive.
+## Returns normalized (lowercase, forward-slash) paths, sorted.
+func find_files(dir_prefix: String, extension: String) -> Array[String]:
+	var prefix := _normalize_path(dir_prefix)
+	var ext := ("." + extension.to_lower().trim_prefix("."))
+	var results: Array[String] = []
+	var seen := {}
+
+	# FPK index
+	for key: String in _fpk_data:
+		if key.begins_with(prefix) and key.ends_with(ext):
+			results.append(key)
+			seen[key] = true
+
+	# Loose files on disk
+	if _base_path != "":
+		var scan_root := _base_path.path_join("Assets").path_join(dir_prefix)
+		_scan_disk_recursive(scan_root, prefix + "/", ext, results, seen)
+
+	results.sort()
+	return results
+
+
+func _scan_disk_recursive(abs_path: String, rel_prefix: String, ext: String, results: Array[String], seen: Dictionary) -> void:
+	var dir := DirAccess.open(abs_path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		if dir.current_is_dir():
+			_scan_disk_recursive(
+				abs_path.path_join(entry),
+				rel_prefix + entry.to_lower() + "/",
+				ext, results, seen
+			)
+		elif entry.to_lower().ends_with(ext):
+			var normalized := rel_prefix + entry.to_lower()
+			if not seen.has(normalized):
+				results.append(normalized)
+				seen[normalized] = true
+		entry = dir.get_next()
+	dir.list_dir_end()
+
+
 ## Extracts an FPK file to the cache directory and returns the globalized path.
 ## Cached files persist for the session (no re-extraction on repeated lookups).
 func _extract_to_cache(normalized_path: String) -> String:
