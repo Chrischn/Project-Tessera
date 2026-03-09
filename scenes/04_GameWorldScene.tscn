@@ -39,9 +39,6 @@ light_energy = 0.4
 [node name="PlayerPivot" type="Node3D" parent="." node_paths=PackedStringArray("cam")]
 script = ExtResource("2_bel4h")
 cam = NodePath("Camera3D")
-move_speed = 16.0
-sprint_multiplier = 3.0
-mouse_sens = 0.001
 
 [node name="Camera3D" type="Camera3D" parent="PlayerPivot"]
 transform = Transform3D(0.906308, 0, 0.422618, 0, 1, 0, -0.422618, 0, 0.906308, 250, 65, 400)
