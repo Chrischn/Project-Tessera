@@ -1,4 +1,17 @@
-//GDExtension Header
+// =============================================================================
+// gdext_niflib.cpp
+// NIF -> Godot scene translation for Civilization IV NIF files (version 20.0.0.4).
+//
+// Responsibilities:
+//   - Coordinate system conversion (NIF left-handed Z-up -> Godot right-handed Y-up)
+//   - Scene graph traversal: NiNode hierarchy -> Godot Node3D hierarchy
+//   - Geometry processing: NiTriShape / NiTriStrips -> ArrayMesh (via SurfaceTool)
+//   - Material and texture loading: NiProperty set -> StandardMaterial3D
+//   - Skeletal skinning: NiSkinInstance -> Skeleton3D + Skin resource
+//
+// Key NIF types used: NiNode, NiTriShape, NiTriStrips, NiSkinInstance, NiSkinData,
+//   NiTexturingProperty, NiMaterialProperty, NiAlphaProperty, NiVertexColorProperty.
+// =============================================================================
 #include "gdext_niflib.hpp"
 
 //niflib Headers
@@ -25,6 +38,9 @@
 #include <godot_cpp/classes/surface_tool.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/sphere_mesh.hpp>
+#include <godot_cpp/classes/immediate_mesh.hpp>
+#include <godot_cpp/classes/label3d.hpp>
 //Standard Library
 #include <vector>
 #include <algorithm>
@@ -34,12 +50,293 @@
 using namespace godot;
 using namespace Niflib;
 
-// --- Coordinate conversion helpers ---
-// NIF (Civ IV): X-right, Z-up, Y-forward (left-handed)
-// Godot:        X-right, Y-up, Z-backward (right-handed)
-// Swap Y<->Z and negate new Z to convert.
+// =============================================================================
+// Coordinate conversion helpers
+// =============================================================================
+// NIF (Civ IV v20.0.0.4): left-handed, Z-up, Y-forward
+// Godot:                  right-handed, Y-up, Z-backward
+//
+// Per-component mapping: Godot(x, y, z) = NIF(x, z, -y)
+// Applied to all vertex positions, normals, and translation vectors.
+// Rotation matrices use: R_godot = P * R_nif * P^T  (see nif_matrix44_to_godot)
+// Winding order fix: triangle indices v2/v3 are swapped (handedness flip reverses
+// front face direction; swap restores correct CCW winding for Godot).
 static godot::Vector3 nif_to_godot_vec3(const Niflib::Vector3& v) {
     return godot::Vector3(v.x, v.z, -v.y);
+}
+
+// Converts a NIF Matrix44 (4x4 transform) to a Godot Transform3D with coordinate system conversion.
+godot::Transform3D GdextNiflib::nif_matrix44_to_godot(const Niflib::Matrix44& mat) {
+    // Extract the 3x3 rotation and translation from Matrix44
+    Niflib::Matrix33 r;
+    Niflib::Vector3 t;
+    float scale;
+    mat.Decompose(t, r, scale);
+
+    // Convert translation
+    godot::Vector3 origin = nif_to_godot_vec3(t);
+
+    // Convert rotation (same formula as apply_nif_transform: R_godot = P * R_nif * P^T)
+    godot::Basis basis;
+    basis.set_column(0, godot::Vector3( r[0][0],  r[2][0], -r[1][0]));
+    basis.set_column(1, godot::Vector3( r[0][2],  r[2][2], -r[1][2]));
+    basis.set_column(2, godot::Vector3(-r[0][1], -r[2][1],  r[1][1]));
+
+    // Apply uniform scale
+    if (std::abs(scale - 1.0f) > 0.0001f) {
+        basis.set_column(0, basis.get_column(0) * scale);
+        basis.set_column(1, basis.get_column(1) * scale);
+        basis.set_column(2, basis.get_column(2) * scale);
+    }
+
+    return godot::Transform3D(basis, origin);
+}
+
+// =============================================================================
+// Skeletal skinning setup
+// =============================================================================
+// build_skeleton() constructs a Godot Skeleton3D from a NIF NiSkinInstance and
+// prepares a Skin resource with the correct inverse-rest bind poses.
+//
+// CRITICAL DESIGN NOTES (hard-won):
+//
+// 1. Coordinate frame for bone rests:
+//    Bone world transforms from niflib are in NIF world space.  We express them
+//    relative to the parent NiNode (parent_world_godot.inverse * bone_world) so
+//    that the Skeleton3D -- which sits at identity under the parent NiNode's Godot
+//    node -- matches what the vertices expect.
+//
+// 2. Explicit Skin resource (create_skin_from_rest_transforms):
+//    Without a Skin, Godot uses identity bind poses.  The GPU skinning formula is:
+//      bone_matrix[i] = bone_global_pose[i] * bind_pose[i]
+//    With identity bind_pose: bone_matrix = pose (not identity at rest) -> distortion.
+//    create_skin_from_rest_transforms() sets bind_pose[i] = bone_global_rest[i].inverse()
+//    so at rest: pose * inverse_rest = identity -> no deformation.
+//
+// 3. reset_bone_poses() is mandatory:
+//    In Godot 4, Skeleton3D bone poses default to identity, NOT to the rest pose.
+//    If poses stay at identity: bone_matrix = identity * inverse_rest = inverse_rest
+//    -> every vertex gets the inverse-rest transform applied -> crumpled mesh.
+//    reset_bone_poses() sets pose[i] = rest[i] so the formula cancels correctly.
+//
+// Populates bone_index_map (NiNode* -> Godot bone index) for weight assignment.
+Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent_ni_node) {
+    if (!skin) return nullptr;
+
+    NiSkinDataRef skin_data = skin->GetSkinData();
+    if (!skin_data) return nullptr;
+
+    std::vector<NiNodeRef> bones = skin->GetBones();
+    unsigned int bone_count = (unsigned int)bones.size();
+    if (bone_count == 0) return nullptr;
+
+    Skeleton3D* skeleton = memnew(Skeleton3D);
+    skeleton->set_name("Skeleton3D");
+
+    // Step 1: Add all bones and build index map
+    bone_index_map.clear();
+    for (unsigned int i = 0; i < bone_count; ++i) {
+        NiNodeRef bone = bones[i];
+        if (bone == NULL) continue;
+
+        std::string bone_name = bone->GetName();
+        if (bone_name.empty()) bone_name = "bone_" + std::to_string(i);
+
+        int godot_idx = skeleton->add_bone(String::utf8(bone_name.c_str()));
+        bone_index_map[bone] = godot_idx;
+    }
+
+    // Step 2: Set bone parent hierarchy
+    for (unsigned int i = 0; i < bone_count; ++i) {
+        NiNodeRef bone = bones[i];
+        if (bone == NULL) continue;
+
+        // Walk up NIF parent chain to find a parent that is also in our bone list
+        NiNodeRef parent = bone->GetParent();
+        while (parent != NULL) {
+            auto it = bone_index_map.find(parent);
+            if (it != bone_index_map.end()) {
+                skeleton->set_bone_parent(bone_index_map[bone], it->second);
+                break;
+            }
+            parent = parent->GetParent();
+        }
+        // If no parent found in bone list, bone stays as root (-1 parent, the default)
+    }
+
+    // Step 3: Compute rest poses from bone world transforms.
+    // Express bone transforms relative to the parent NiNode so that the
+    // Skeleton3D (which sits under the parent's Godot node) doesn't
+    // double-apply the hierarchy transforms.
+    godot::Transform3D parent_world_godot;
+    if (parent_ni_node != NULL) {
+        parent_world_godot = nif_matrix44_to_godot(parent_ni_node->GetWorldTransform());
+    }
+
+    std::vector<godot::Transform3D> bone_globals(bone_count);
+    for (unsigned int i = 0; i < bone_count; ++i) {
+        NiNodeRef bone = bones[i];
+        if (bone == NULL) continue;
+
+        godot::Transform3D bone_world = nif_matrix44_to_godot(bone->GetWorldTransform());
+        // Convert from world space to skeleton-local space
+        if (parent_ni_node != NULL) {
+            bone_globals[i] = parent_world_godot.affine_inverse() * bone_world;
+        } else {
+            bone_globals[i] = bone_world;
+        }
+    }
+
+    // Set rest transforms (local to parent bone)
+    for (unsigned int i = 0; i < bone_count; ++i) {
+        NiNodeRef bone = bones[i];
+        if (bone == NULL) continue;
+
+        int parent_idx = skeleton->get_bone_parent(bone_index_map[bone]);
+        godot::Transform3D rest;
+        if (parent_idx >= 0) {
+            // Find which NIF bone has this parent index
+            godot::Transform3D parent_global;
+            for (unsigned int j = 0; j < bone_count; ++j) {
+                if (bones[j] != NULL && bone_index_map[bones[j]] == parent_idx) {
+                    parent_global = bone_globals[j];
+                    break;
+                }
+            }
+            rest = parent_global.affine_inverse() * bone_globals[i];
+        } else {
+            // Root bone: rest relative to skeleton origin
+            rest = bone_globals[i];
+        }
+
+        skeleton->set_bone_rest(bone_index_map[bone], rest);
+    }
+
+    // Initialize bone poses from rests.
+    // In Godot 4, bone poses default to identity -- NOT the rest transform.
+    // Without this, skinning computes: T = identity * inverse_rest = inverse_rest != identity.
+    skeleton->reset_bone_poses();
+
+    NiNodeRef skel_root = skin->GetSkeletonRoot();
+    UtilityFunctions::print("[SKIN] Built skeleton: ", bone_count, " bones, root=",
+        skel_root ? String::utf8(skel_root->GetName().c_str()) : String("<null>"));
+
+    // Create explicit Skin with inverse-rest bind poses so skinning gives identity at rest.
+    // Without this, Godot uses identity bind poses, applying bone_global_rest directly to
+    // vertices (bone_global_rest * identity != identity), causing distortion.
+    Ref<Skin> skin_res = skeleton->create_skin_from_rest_transforms();
+    skin_cache[skel_root] = skin_res;
+
+    return skeleton;
+}
+
+// Debug visualization: adds colored spheres, bone-to-bone lines, and name labels
+// for every bone in the skeleton. Organized into separate sub-nodes so GDScript
+// can toggle each layer independently via the 'I' key.
+// Sub-nodes: _BoneDebug/_Lines, _BoneDebug/_Spheres, _BoneDebug/_Labels
+void GdextNiflib::debug_visualize_skeleton(Skeleton3D* skeleton) {
+    if (!skeleton) return;
+
+    int bone_count = skeleton->get_bone_count();
+    if (bone_count == 0) return;
+
+    // --- Materials ---
+    Ref<StandardMaterial3D> sphere_mat;
+    sphere_mat.instantiate();
+    sphere_mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+    sphere_mat->set_albedo(Color(1.0f, 0.2f, 0.2f, 0.9f));
+    sphere_mat->set_flag(StandardMaterial3D::FLAG_DISABLE_DEPTH_TEST, true);
+    sphere_mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+    sphere_mat->set_render_priority(10);
+
+    Ref<StandardMaterial3D> line_mat;
+    line_mat.instantiate();
+    line_mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+    line_mat->set_albedo(Color(1.0f, 1.0f, 0.0f, 0.8f));
+    line_mat->set_flag(StandardMaterial3D::FLAG_DISABLE_DEPTH_TEST, true);
+    line_mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+    line_mat->set_render_priority(10);
+
+    Ref<SphereMesh> sphere_mesh;
+    sphere_mesh.instantiate();
+    sphere_mesh->set_radius(2.0f);
+    sphere_mesh->set_height(4.0f);
+    sphere_mesh->set_radial_segments(8);
+    sphere_mesh->set_rings(4);
+
+    // --- Container hierarchy ---
+    Node3D* debug_root = memnew(Node3D);
+    debug_root->set_name("_BoneDebug");
+    skeleton->add_child(debug_root);
+
+    Node3D* lines_group = memnew(Node3D);
+    lines_group->set_name("_Lines");
+    debug_root->add_child(lines_group);
+
+    Node3D* spheres_group = memnew(Node3D);
+    spheres_group->set_name("_Spheres");
+    debug_root->add_child(spheres_group);
+
+    Node3D* labels_group = memnew(Node3D);
+    labels_group->set_name("_Labels");
+    labels_group->set_visible(false);  // labels hidden by default (cluttered)
+    debug_root->add_child(labels_group);
+
+    // --- Collect bone positions & create markers ---
+    std::vector<Vector3> bone_positions(bone_count);
+
+    for (int i = 0; i < bone_count; ++i) {
+        Transform3D global_rest = skeleton->get_bone_global_rest(i);
+        Vector3 pos = global_rest.origin;
+        bone_positions[i] = pos;
+
+        // Sphere
+        MeshInstance3D* marker = memnew(MeshInstance3D);
+        marker->set_name(String("_bone_") + String::num_int64(i));
+        marker->set_mesh(sphere_mesh);
+        marker->set_surface_override_material(0, sphere_mat);
+        marker->set_position(pos);
+        spheres_group->add_child(marker);
+
+        // Label
+        Label3D* label = memnew(Label3D);
+        String bone_name = skeleton->get_bone_name(i);
+        label->set_text(String("[") + String::num_int64(i) + String("] ") + bone_name);
+        label->set_font_size(32);
+        label->set_pixel_size(0.05f);
+        label->set_position(pos + Vector3(0.0f, 3.0f, 0.0f));
+        label->set_billboard_mode(StandardMaterial3D::BILLBOARD_ENABLED);
+        label->set_modulate(Color(1.0f, 1.0f, 1.0f, 1.0f));
+        label->set_draw_flag(Label3D::FLAG_DISABLE_DEPTH_TEST, true);
+        label->set_render_priority(11);
+        labels_group->add_child(label);
+    }
+
+    // --- Lines connecting parent-child bones ---
+    Ref<ImmediateMesh> line_mesh;
+    line_mesh.instantiate();
+    line_mesh->surface_begin(Mesh::PRIMITIVE_LINES);
+
+    bool has_lines = false;
+    for (int i = 0; i < bone_count; ++i) {
+        int parent_idx = skeleton->get_bone_parent(i);
+        if (parent_idx >= 0 && parent_idx < bone_count) {
+            line_mesh->surface_add_vertex(bone_positions[parent_idx]);
+            line_mesh->surface_add_vertex(bone_positions[i]);
+            has_lines = true;
+        }
+    }
+    line_mesh->surface_end();
+
+    if (has_lines) {
+        MeshInstance3D* line_instance = memnew(MeshInstance3D);
+        line_instance->set_name("_bone_lines");
+        line_instance->set_mesh(line_mesh);
+        line_instance->set_surface_override_material(0, line_mat);
+        lines_group->add_child(line_instance);
+    }
+
+    UtilityFunctions::print("[DEBUG] Bone visualization: ", bone_count, " bones");
 }
 
 // Loads a DDS texture via VFS (FPK archives + loose files), with caching.
@@ -284,6 +581,8 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         // Clear per-NIF state
         texture_cache.clear();
         current_nif_dir = "";
+        bone_index_map.clear();
+        skeleton_cache.clear();
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -419,6 +718,10 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
             auto tex = load_dds_texture(base_path, albedo_desc.source->GetTextureFileName());
             if (tex.is_valid()) {
                 mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, tex);
+                // Reset albedo color to white, preserving alpha.
+                // Godot multiplies albedo_color * albedo_texture. If the NIF material has
+                // a grey diffuse like (0.8,0.8,0.8), the texture would appear darkened.
+                // White ensures the texture displays at full intensity.
                 godot::Color current = mat->get_albedo();
                 mat->set_albedo(godot::Color(1.0f, 1.0f, 1.0f, current.a));
                 UtilityFunctions::print("[TEX] Albedo from slot ", slot, ": ",
@@ -477,8 +780,8 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
 }
 
 // Processes a NiTriShape: builds a MeshInstance3D with geometry + material.
-// Phases 1-3: geometry (vertices, normals, UVs, vertex colors) + material colors.
-Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String& base_path) {
+// If skeleton is non-null, detects NiSkinInstance and adds bone weights.
+Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String& base_path, Skeleton3D* skeleton) {
     if (!tri_shape) return nullptr;
 
     // Get geometry data
@@ -497,7 +800,6 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
     std::vector<Niflib::Vector3> normals = data->GetNormals();
     bool has_normals = !normals.empty() && (normals.size() == vertices.size());
 
-    // Phase 2: UV coordinates
     int uv_count = data->GetUVSetCount();
     std::vector<Niflib::TexCoord> uvs;
     if (uv_count > 0) {
@@ -505,9 +807,114 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
     }
     bool has_uvs = !uvs.empty() && (uvs.size() == vertices.size());
 
-    // Phase 2: Vertex colors
     std::vector<Niflib::Color4> colors = data->GetColors();
     bool has_colors = !colors.empty() && (colors.size() == vertices.size());
+
+    // --- Skinning detection ---
+    // NIF stores per-bone vertex weights in NiSkinInstance/NiSkinData.
+    NiSkinInstanceRef skin = tri_shape->GetSkinInstance();
+    NiSkinDataRef skin_data;
+    bool is_skinned = false;
+    // skin_vertex_transform: geometry local transform baked into vertex positions.
+    // For skinned meshes, MeshInstance3D is at identity under Skeleton3D, so the
+    // geometry's own local offset must be folded into the vertex data directly.
+    godot::Transform3D skin_vertex_transform;
+
+    // Per-vertex bone weights: vertex_index -> [(godot_bone_idx, weight), ...]
+    std::vector<std::vector<std::pair<int, float>>> vertex_weights;
+
+    if (skin != NULL && skeleton != nullptr) {
+        skin_data = skin->GetSkinData();
+        if (skin_data != NULL) {
+            is_skinned = true;
+            vertex_weights.resize(vertices.size());
+
+            // Build the geometry's local transform (same components as apply_nif_transform)
+            {
+                NiAVObjectRef av = StaticCast<NiAVObject>(tri_shape);
+                Niflib::Vector3 gt = av->GetLocalTranslation();
+                Niflib::Matrix33 gr = av->GetLocalRotation();
+                float gs = av->GetLocalScale();
+
+                godot::Vector3 origin = nif_to_godot_vec3(gt);
+                godot::Basis basis;
+                basis.set_column(0, godot::Vector3( gr[0][0],  gr[2][0], -gr[1][0]));
+                basis.set_column(1, godot::Vector3( gr[0][2],  gr[2][2], -gr[1][2]));
+                basis.set_column(2, godot::Vector3(-gr[0][1], -gr[2][1],  gr[1][1]));
+                if (std::abs(gs - 1.0f) > 0.0001f) {
+                    basis.set_column(0, basis.get_column(0) * gs);
+                    basis.set_column(1, basis.get_column(1) * gs);
+                    basis.set_column(2, basis.get_column(2) * gs);
+                }
+                skin_vertex_transform = godot::Transform3D(basis, origin);
+            }
+            UtilityFunctions::print("[SKIN] geom_local origin=(",
+                skin_vertex_transform.origin.x, ", ",
+                skin_vertex_transform.origin.y, ", ",
+                skin_vertex_transform.origin.z, ")");
+
+            std::vector<NiNodeRef> bones = skin->GetBones();
+            unsigned int bone_count = skin_data->GetBoneCount();
+
+            // Invert per-bone weights to per-vertex
+            for (unsigned int b = 0; b < bone_count; ++b) {
+                NiNodeRef bone_node = (b < bones.size()) ? bones[b] : NiNodeRef();
+                if (bone_node == NULL) continue;
+
+                auto it = bone_index_map.find(bone_node);
+                if (it == bone_index_map.end()) continue;
+                int godot_bone = it->second;
+
+                std::vector<SkinWeight> weights = skin_data->GetBoneWeights(b);
+                for (const auto& sw : weights) {
+                    if (sw.index < vertices.size()) {
+                        vertex_weights[sw.index].push_back({godot_bone, sw.weight});
+                    }
+                }
+            }
+
+            // Godot GPU skinning supports exactly 4 influences per vertex.
+            // Sort descending, truncate to 4, pad with zeros, re-normalize to sum=1.
+            for (auto& vw : vertex_weights) {
+                std::sort(vw.begin(), vw.end(),
+                    [](const std::pair<int,float>& a, const std::pair<int,float>& b) {
+                        return a.second > b.second;
+                    });
+                // Keep top 4
+                if (vw.size() > 4) vw.resize(4);
+                // Pad to 4
+                while (vw.size() < 4) vw.push_back({0, 0.0f});
+                // Normalize
+                float sum = 0.0f;
+                for (auto& p : vw) sum += p.second;
+                if (sum > 0.0001f) {
+                    for (auto& p : vw) p.second /= sum;
+                }
+            }
+
+            // Diagnostic: count vertices with non-zero weights from NiSkinData
+            unsigned int verts_with_weights = 0;
+            unsigned int total_weight_entries = 0;
+            for (const auto& vw : vertex_weights) {
+                for (const auto& p : vw) {
+                    if (p.second > 0.0001f) { ++total_weight_entries; break; }
+                }
+                // Count separately
+                bool has_any = false;
+                for (const auto& p : vw) {
+                    if (p.second > 0.0001f) { has_any = true; break; }
+                }
+                if (has_any) ++verts_with_weights;
+            }
+            NiSkinPartitionRef skin_part = skin->GetSkinPartition();
+            UtilityFunctions::print("[SKIN] shape=\"",
+                String::utf8(nif_display_name(StaticCast<NiObject>(tri_shape)).c_str()),
+                "\" bones=", bone_count,
+                " verts=", (int)vertices.size(),
+                " verts_with_skindata_weights=", verts_with_weights,
+                " skin_partition=", skin_part != NULL ? "YES" : "NO");
+        }
+    }
 
     // Build mesh via SurfaceTool
     Ref<SurfaceTool> st;
@@ -516,8 +923,27 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
 
     // Per-vertex attributes (order matters: set attributes BEFORE add_vertex)
     for (size_t i = 0; i < vertices.size(); ++i) {
+        // Convert vertex position from NIF to Godot coordinates
+        godot::Vector3 pos = nif_to_godot_vec3(vertices[i]);
+        godot::Vector3 norm;
         if (has_normals) {
-            st->set_normal(nif_to_godot_vec3(normals[i]));
+            norm = nif_to_godot_vec3(normals[i]);
+        }
+
+        // For skinned meshes: bake the geometry's local transform into vertices.
+        // The MeshInstance3D sits at identity under Skeleton3D (in parent NiNode space),
+        // so vertices must be in parent NiNode space. The geometry's local transform
+        // maps from geometry space to parent NiNode space — same as apply_nif_transform
+        // does for non-skinned meshes, but baked into vertex data.
+        if (is_skinned) {
+            pos = skin_vertex_transform.xform(pos);
+            if (has_normals) {
+                norm = skin_vertex_transform.basis.xform(norm).normalized();
+            }
+        }
+
+        if (has_normals) {
+            st->set_normal(norm);
         }
         if (has_uvs) {
             st->set_uv(godot::Vector2(uvs[i].u, uvs[i].v));
@@ -525,7 +951,19 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
         if (has_colors) {
             st->set_color(godot::Color(colors[i].r, colors[i].g, colors[i].b, colors[i].a));
         }
-        st->add_vertex(nif_to_godot_vec3(vertices[i]));
+        if (is_skinned && i < vertex_weights.size()) {
+            PackedInt32Array bone_ids;
+            PackedFloat32Array bone_wts;
+            bone_ids.resize(4);
+            bone_wts.resize(4);
+            for (int j = 0; j < 4; ++j) {
+                bone_ids[j] = vertex_weights[i][j].first;
+                bone_wts[j] = vertex_weights[i][j].second;
+            }
+            st->set_bones(bone_ids);
+            st->set_weights(bone_wts);
+        }
+        st->add_vertex(pos);
     }
 
     // Triangle indices (swap v2/v3 to fix winding order after coordinate handedness change)
@@ -549,20 +987,31 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
     mesh_instance->set_name(String::utf8(name.c_str()));
     mesh_instance->set_mesh(mesh);
 
-    // Phase 3: Material from NIF properties
+    // Material from NIF properties
     std::vector<Niflib::Ref<NiProperty>> properties = tri_shape->GetProperties();
     Ref<StandardMaterial3D> mat = create_material_from_properties(properties, has_colors, base_path);
     mesh_instance->set_surface_override_material(0, mat);
 
-    // Apply transform from the NiTriShape node
-    apply_nif_transform(StaticCast<NiAVObject>(tri_shape), mesh_instance);
+    if (is_skinned && skeleton != nullptr) {
+        // ".." resolves to the parent Skeleton3D in the scene tree.
+        // The Skin resource gives bind_pose[i] = bone_global_rest[i].inverse(), so at rest
+        // bone_matrix = rest * inverse_rest = identity -> mesh renders in its bind pose.
+        mesh_instance->set_skeleton_path(NodePath(".."));
+        NiNodeRef skel_root = skin->GetSkeletonRoot();
+        auto skin_it = skin_cache.find(skel_root);
+        if (skin_it != skin_cache.end() && skin_it->second.is_valid()) {
+            mesh_instance->set_skin(skin_it->second);
+        }
+    } else {
+        apply_nif_transform(StaticCast<NiAVObject>(tri_shape), mesh_instance);
+    }
 
     return mesh_instance;
 }
 
 // Processes a NiTriStrips: builds a MeshInstance3D with geometry + material.
-// NiTriStripsData::GetTriangles() converts strips to triangles, so mesh building is identical to NiTriShape.
-Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const String& base_path) {
+// If skeleton is non-null, detects NiSkinInstance and adds bone weights.
+Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const String& base_path, Skeleton3D* skeleton) {
     if (!tri_strips) return nullptr;
 
     NiGeometryDataRef geom_data = tri_strips->GetData();
@@ -589,15 +1038,125 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
     std::vector<Niflib::Color4> colors = data->GetColors();
     bool has_colors = !colors.empty() && (colors.size() == vertices.size());
 
+    // Detect skinning (same logic as process_ni_tri_shape)
+    NiSkinInstanceRef skin = tri_strips->GetSkinInstance();
+    NiSkinDataRef skin_data;
+    bool is_skinned = false;
+    godot::Transform3D skin_vertex_transform;
+    std::vector<std::vector<std::pair<int, float>>> vertex_weights;
+
+    if (skin != NULL && skeleton != nullptr) {
+        skin_data = skin->GetSkinData();
+        if (skin_data != NULL) {
+            is_skinned = true;
+            vertex_weights.resize(vertices.size());
+
+            // Build the geometry's local transform (same as apply_nif_transform)
+            {
+                NiAVObjectRef av = StaticCast<NiAVObject>(tri_strips);
+                Niflib::Vector3 gt = av->GetLocalTranslation();
+                Niflib::Matrix33 gr = av->GetLocalRotation();
+                float gs = av->GetLocalScale();
+
+                godot::Vector3 origin = nif_to_godot_vec3(gt);
+                godot::Basis basis;
+                basis.set_column(0, godot::Vector3( gr[0][0],  gr[2][0], -gr[1][0]));
+                basis.set_column(1, godot::Vector3( gr[0][2],  gr[2][2], -gr[1][2]));
+                basis.set_column(2, godot::Vector3(-gr[0][1], -gr[2][1],  gr[1][1]));
+                if (std::abs(gs - 1.0f) > 0.0001f) {
+                    basis.set_column(0, basis.get_column(0) * gs);
+                    basis.set_column(1, basis.get_column(1) * gs);
+                    basis.set_column(2, basis.get_column(2) * gs);
+                }
+                skin_vertex_transform = godot::Transform3D(basis, origin);
+            }
+
+            std::vector<NiNodeRef> bones = skin->GetBones();
+            unsigned int bone_count = skin_data->GetBoneCount();
+
+            for (unsigned int b = 0; b < bone_count; ++b) {
+                NiNodeRef bone_node = (b < bones.size()) ? bones[b] : NiNodeRef();
+                if (bone_node == NULL) continue;
+                auto it = bone_index_map.find(bone_node);
+                if (it == bone_index_map.end()) continue;
+                int godot_bone = it->second;
+
+                std::vector<SkinWeight> weights = skin_data->GetBoneWeights(b);
+                for (const auto& sw : weights) {
+                    if (sw.index < vertices.size()) {
+                        vertex_weights[sw.index].push_back({godot_bone, sw.weight});
+                    }
+                }
+            }
+
+            // Godot GPU skinning supports exactly 4 influences per vertex.
+            // Sort descending, truncate to 4, pad with zeros, re-normalize to sum=1.
+            for (auto& vw : vertex_weights) {
+                std::sort(vw.begin(), vw.end(),
+                    [](const std::pair<int,float>& a, const std::pair<int,float>& b) {
+                        return a.second > b.second;
+                    });
+                if (vw.size() > 4) vw.resize(4);
+                while (vw.size() < 4) vw.push_back({0, 0.0f});
+                float sum = 0.0f;
+                for (auto& p : vw) sum += p.second;
+                if (sum > 0.0001f) {
+                    for (auto& p : vw) p.second /= sum;
+                }
+            }
+
+            // Diagnostic: count vertices with non-zero weights from NiSkinData
+            unsigned int verts_with_weights = 0;
+            for (const auto& vw2 : vertex_weights) {
+                for (const auto& p : vw2) {
+                    if (p.second > 0.0001f) { ++verts_with_weights; break; }
+                }
+            }
+            NiSkinPartitionRef skin_part = skin->GetSkinPartition();
+            UtilityFunctions::print("[SKIN] shape=\"",
+                String::utf8(nif_display_name(StaticCast<NiObject>(tri_strips)).c_str()),
+                "\" bones=", bone_count,
+                " verts=", (int)vertices.size(),
+                " verts_with_skindata_weights=", verts_with_weights,
+                " skin_partition=", skin_part != NULL ? "YES" : "NO");
+        }
+    }
+
     Ref<SurfaceTool> st;
     st.instantiate();
     st->begin(Mesh::PRIMITIVE_TRIANGLES);
 
     for (size_t i = 0; i < vertices.size(); ++i) {
-        if (has_normals) st->set_normal(nif_to_godot_vec3(normals[i]));
+        godot::Vector3 pos = nif_to_godot_vec3(vertices[i]);
+        godot::Vector3 norm;
+        if (has_normals) {
+            norm = nif_to_godot_vec3(normals[i]);
+        }
+
+        // For skinned meshes: bake geometry's local transform into vertices
+        if (is_skinned) {
+            pos = skin_vertex_transform.xform(pos);
+            if (has_normals) {
+                norm = skin_vertex_transform.basis.xform(norm).normalized();
+            }
+        }
+
+        if (has_normals) st->set_normal(norm);
         if (has_uvs) st->set_uv(godot::Vector2(uvs[i].u, uvs[i].v));
         if (has_colors) st->set_color(godot::Color(colors[i].r, colors[i].g, colors[i].b, colors[i].a));
-        st->add_vertex(nif_to_godot_vec3(vertices[i]));
+        if (is_skinned) {
+            PackedInt32Array bone_ids;
+            PackedFloat32Array bone_wts;
+            bone_ids.resize(4);
+            bone_wts.resize(4);
+            for (int j = 0; j < 4; ++j) {
+                bone_ids[j] = vertex_weights[i][j].first;
+                bone_wts[j] = vertex_weights[i][j].second;
+            }
+            st->set_bones(bone_ids);
+            st->set_weights(bone_wts);
+        }
+        st->add_vertex(pos);
     }
 
     for (const auto& tri : triangles) {
@@ -620,13 +1179,36 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
     Ref<StandardMaterial3D> mat = create_material_from_properties(properties, has_colors, base_path);
     mesh_instance->set_surface_override_material(0, mat);
 
-    apply_nif_transform(StaticCast<NiAVObject>(tri_strips), mesh_instance);
+    if (is_skinned && skeleton != nullptr) {
+        mesh_instance->set_skeleton_path(NodePath(".."));
+        // Set explicit Skin so bind poses = inverse-rest (identity skinning at rest)
+        NiNodeRef skel_root = skin->GetSkeletonRoot();
+        auto skin_it = skin_cache.find(skel_root);
+        if (skin_it != skin_cache.end() && skin_it->second.is_valid()) {
+            mesh_instance->set_skin(skin_it->second);
+        }
+    } else {
+        apply_nif_transform(StaticCast<NiAVObject>(tri_strips), mesh_instance);
+    }
 
     return mesh_instance;
 }
 
-// Recursively processes the NIF scene graph starting from an NiNode.
-// Uses GetChildren() (scene graph only) instead of GetRefs() (all references).
+// =============================================================================
+// Scene graph traversal
+// =============================================================================
+// Recursively maps the NIF scene graph to Godot nodes.
+// Uses GetChildren() (scene graph), not GetRefs() (all NIF references).
+//
+// Scene tree built for a skinned unit:
+//   NiNode ("MD NonAccum") -> Node3D  (apply_nif_transform applied)
+//     Skeleton3D (identity)            <- one per skeleton root, reused across shapes
+//       MeshInstance3D (identity)      <- skinned; skeleton_path="..", explicit Skin
+//       _BoneDebug (debug vis)
+//
+// Skeleton caching: shapes sharing the same skeleton root reuse one Skeleton3D.
+// On cache hit, bone_index_map is rebuilt by name-lookup so each shape's bone
+// subset is correctly mapped even if NiNode pointers differ across shapes.
 void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const String& base_path) {
     if (!ni_node || !parent_godot) return;
 
@@ -648,15 +1230,128 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
             process_ni_node(child_node, godot_node, base_path);
         }
         else if (NiTriShapeRef tri_shape = DynamicCast<NiTriShape>(child)) {
-            Node3D* mesh_node = process_ni_tri_shape(tri_shape, base_path);
-            if (mesh_node) {
-                godot_node->add_child(mesh_node);
+            // Check if this shape is skinned
+            NiSkinInstanceRef skin = tri_shape->GetSkinInstance();
+            std::string shape_name = nif_display_name(StaticCast<NiObject>(tri_shape));
+            if (skin != NULL) {
+                NiNodeRef skel_root = skin->GetSkeletonRoot();
+                std::vector<NiNodeRef> skin_bones = skin->GetBones();
+                UtilityFunctions::print("[DIAG] SKINNED NiTriShape: \"",
+                    String::utf8(shape_name.c_str()),
+                    "\" skel_root=\"",
+                    skel_root ? String::utf8(skel_root->GetName().c_str()) : String("<null>"),
+                    "\" bones=", (int)skin_bones.size(),
+                    " parent_node=\"", String::utf8(name.c_str()), "\"");
+
+                // Build or reuse Skeleton3D for this skeleton root
+                Skeleton3D* skeleton = nullptr;
+
+                auto cache_it = skeleton_cache.find(skel_root);
+                if (cache_it != skeleton_cache.end()) {
+                    skeleton = cache_it->second;
+                    // Rebuild bone_index_map for this shape's bone set from the cached skeleton.
+                    // The cached skeleton was built for a previous shape; its bone_index_map may
+                    // be stale if this shape references different bone nodes.
+                    bone_index_map.clear();
+                    for (const auto& bone_node : skin_bones) {
+                        if (bone_node == NULL) continue;
+                        std::string bname = bone_node->GetName();
+                        int gidx = skeleton->find_bone(String::utf8(bname.c_str()));
+                        if (gidx >= 0) bone_index_map[bone_node] = gidx;
+                    }
+                    UtilityFunctions::print("[DIAG]   -> Using CACHED skeleton (",
+                        skeleton->get_bone_count(), " bones in skeleton vs ",
+                        (int)skin_bones.size(), " bones in this shape's skin)");
+                } else {
+                    skeleton = build_skeleton(skin, ni_node);
+                    if (skeleton) {
+                        skeleton_cache[skel_root] = skeleton;
+                        godot_node->add_child(skeleton);
+                        UtilityFunctions::print("[DIAG]   -> Built NEW skeleton under: ",
+                            String::utf8(name.c_str()));
+                        if (debug_show_bones) {
+                            debug_visualize_skeleton(skeleton);
+                        }
+                    }
+                }
+
+                if (skeleton) {
+                    Node3D* mesh_node = process_ni_tri_shape(tri_shape, base_path, skeleton);
+                    if (mesh_node) {
+                        skeleton->add_child(mesh_node);
+                    }
+                } else {
+                    UtilityFunctions::push_warning("[SKIN] Skeleton build failed, treating as static: ",
+                        String::utf8(shape_name.c_str()));
+                    Node3D* mesh_node = process_ni_tri_shape(tri_shape, base_path);
+                    if (mesh_node) godot_node->add_child(mesh_node);
+                }
+            } else {
+                UtilityFunctions::print("[DIAG] STATIC NiTriShape: \"",
+                    String::utf8(shape_name.c_str()), "\"");
+                Node3D* mesh_node = process_ni_tri_shape(tri_shape, base_path);
+                if (mesh_node) {
+                    godot_node->add_child(mesh_node);
+                }
             }
         }
         else if (NiTriStripsRef tri_strips = DynamicCast<NiTriStrips>(child)) {
-            Node3D* mesh_node = process_ni_tri_strips(tri_strips, base_path);
-            if (mesh_node) {
-                godot_node->add_child(mesh_node);
+            NiSkinInstanceRef skin = tri_strips->GetSkinInstance();
+            std::string strip_name = nif_display_name(StaticCast<NiObject>(tri_strips));
+            if (skin != NULL) {
+                NiNodeRef skel_root = skin->GetSkeletonRoot();
+                std::vector<NiNodeRef> skin_bones = skin->GetBones();
+                UtilityFunctions::print("[DIAG] SKINNED NiTriStrips: \"",
+                    String::utf8(strip_name.c_str()),
+                    "\" skel_root=\"",
+                    skel_root ? String::utf8(skel_root->GetName().c_str()) : String("<null>"),
+                    "\" bones=", (int)skin_bones.size(),
+                    " parent_node=\"", String::utf8(name.c_str()), "\"");
+
+                Skeleton3D* skeleton = nullptr;
+                auto cache_it = skeleton_cache.find(skel_root);
+                if (cache_it != skeleton_cache.end()) {
+                    skeleton = cache_it->second;
+                    // Rebuild bone_index_map for this shape's bone set from the cached skeleton.
+                    bone_index_map.clear();
+                    for (const auto& bone_node : skin_bones) {
+                        if (bone_node == NULL) continue;
+                        std::string bname = bone_node->GetName();
+                        int gidx = skeleton->find_bone(String::utf8(bname.c_str()));
+                        if (gidx >= 0) bone_index_map[bone_node] = gidx;
+                    }
+                    UtilityFunctions::print("[DIAG]   -> Using CACHED skeleton (",
+                        skeleton->get_bone_count(), " bones in skeleton vs ",
+                        (int)skin_bones.size(), " bones in this shape's skin)");
+                } else {
+                    skeleton = build_skeleton(skin, ni_node);
+                    if (skeleton) {
+                        skeleton_cache[skel_root] = skeleton;
+                        godot_node->add_child(skeleton);
+                        UtilityFunctions::print("[DIAG]   -> Built NEW skeleton under: ",
+                            String::utf8(strip_name.c_str()));
+                        if (debug_show_bones) {
+                            debug_visualize_skeleton(skeleton);
+                        }
+                    }
+                }
+
+                if (skeleton) {
+                    Node3D* mesh_node = process_ni_tri_strips(tri_strips, base_path, skeleton);
+                    if (mesh_node) {
+                        skeleton->add_child(mesh_node);
+                    }
+                } else {
+                    Node3D* mesh_node = process_ni_tri_strips(tri_strips, base_path);
+                    if (mesh_node) godot_node->add_child(mesh_node);
+                }
+            } else {
+                UtilityFunctions::print("[DIAG] STATIC NiTriStrips: \"",
+                    String::utf8(strip_name.c_str()), "\"");
+                Node3D* mesh_node = process_ni_tri_strips(tri_strips, base_path);
+                if (mesh_node) {
+                    godot_node->add_child(mesh_node);
+                }
             }
         }
         else {

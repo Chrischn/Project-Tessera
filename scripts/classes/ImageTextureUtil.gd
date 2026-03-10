@@ -2,16 +2,16 @@
 # Script Name:        Class_ImageTextureUtil.gd
 # Author(s):          Chrischn89
 # Godot Version:      4.5
-# Description:        
+# Description:
 #	GameWorldScene.gd controls the game's main 3D world
 #
-# TODO:              
+# TODO:
 #     -
 #
 #
-# Notes:              
+# Notes:
 #     -
-# 
+#
 # License:
 #	Released under the terms of the GNU General Public License version 3.0
 #
@@ -29,8 +29,8 @@ static func load_dds_from_buffer(ByteArray: PackedByteArray) -> ImageTexture:
 	var img = ResourceLoader.load(tmp,"ImageTexture",ResourceLoader.CACHE_MODE_IGNORE)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(tmp))
 	return img
-	
-	
+
+
 ## Reads a file and tries to return it as an ImageTexture
 static func load_texture_from_file(path: String) -> ImageTexture:
 	# Try to access image file behind path and convert it to texture else error
