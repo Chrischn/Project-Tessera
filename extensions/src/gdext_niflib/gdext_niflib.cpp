@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // gdext_niflib.cpp
 // NIF -> Godot scene translation for Civilization IV NIF files (version 20.0.0.4).
 //
@@ -727,6 +727,21 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
                 UtilityFunctions::print("[TEX] Albedo from slot ", slot, ": ",
                     String::utf8(albedo_desc.source->GetTextureFileName().c_str()));
                 albedo_loaded = true;
+            }
+        }
+        // GLOSS_MAP (slot 3) -> roughness texture
+        // Civ IV GLOSS_MAP is glossiness (bright = glossy = low roughness).
+        // Godot's roughness texture is the inverse (bright = rough).
+        // TODO: invert gloss->roughness for accurate PBR reproduction.
+        if (tex_prop->HasTexture(3)) {
+            TexDesc gloss_desc = tex_prop->GetTexture(3);
+            if (gloss_desc.source != NULL && gloss_desc.source->IsTextureExternal()) {
+                auto tex = load_dds_texture(base_path, gloss_desc.source->GetTextureFileName());
+                if (tex.is_valid()) {
+                    mat->set_texture(StandardMaterial3D::TEXTURE_ROUGHNESS, tex);
+                    UtilityFunctions::print("[TEX] Roughness (GLOSS_MAP) from slot 3: ",
+                        String::utf8(gloss_desc.source->GetTextureFileName().c_str()));
+                }
             }
         }
         // GLOW_MAP (slot 4) — skipped.
