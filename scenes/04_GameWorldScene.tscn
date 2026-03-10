@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://cp524vky5x2jo" path="res://scripts/GameWorldScene.gd" id="1_xlnkm"]
 [ext_resource type="Script" uid="uid://c5ffua0yrvqft" path="res://scripts/PlayerPivot.gd" id="2_bel4h"]
-[ext_resource type="Script" uid="uid://daxisindic01r" path="res://scripts/AxisIndicator.gd" id="3_axis1"]
+[ext_resource type="Script" uid="uid://d18lb15mdu1kn" path="res://scripts/AxisIndicator.gd" id="3_axis1"]
 
 [sub_resource type="Environment" id="Environment_abc01"]
 background_mode = 1
