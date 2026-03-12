@@ -34,6 +34,8 @@ var _debug_mode_names: Array[String] = [
 	"Debug only (mesh hidden)", "Mesh only (debug hidden)", "Everything visible"
 ]
 var _debug_hud_label: Label = null
+var _unit_name_label: Label = null
+var _unit_counter_label: Label = null
 
 
 func setup(base_path: String) -> void:
@@ -84,9 +86,13 @@ func _load_unit(index: int) -> void:
 	_unit_container = container
 
 	var niflib := GdextNiflib.new()
+	# TODO: drive team_color from game state (player civilization color).
+	# Blue used here as a visible test value; white = no tinting.
+	niflib.team_color = Color(0.2, 0.4, 1.0)
 	niflib.load_nif_scene(disk_path, container, _base_path)
 	print("UnitCycler [%d/%d]: %s" % [index + 1, _unit_paths.size(), nif_path])
 	_apply_debug_mode()
+	_update_unit_hud()
 
 
 # --- Debug visualization toggle (press I) ---
@@ -208,6 +214,46 @@ func _setup_debug_hud() -> void:
 	_debug_hud_label.offset_left = 10
 	_debug_hud_label.offset_bottom = -10
 	canvas.add_child(_debug_hud_label)
+
+	# Top-center: current unit filename
+	_unit_name_label = Label.new()
+	_unit_name_label.add_theme_font_size_override("font_size", 20)
+	_unit_name_label.add_theme_color_override("font_color", Color.WHITE)
+	_unit_name_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	_unit_name_label.add_theme_constant_override("shadow_offset_x", 1)
+	_unit_name_label.add_theme_constant_override("shadow_offset_y", 1)
+	_unit_name_label.anchor_left = 0.5
+	_unit_name_label.anchor_right = 0.5
+	_unit_name_label.anchor_top = 0.0
+	_unit_name_label.anchor_bottom = 0.0
+	_unit_name_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_unit_name_label.offset_top = 10
+	_unit_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	canvas.add_child(_unit_name_label)
+
+	# Top-right: counter (current / total)
+	_unit_counter_label = Label.new()
+	_unit_counter_label.add_theme_font_size_override("font_size", 20)
+	_unit_counter_label.add_theme_color_override("font_color", Color.WHITE)
+	_unit_counter_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	_unit_counter_label.add_theme_constant_override("shadow_offset_x", 1)
+	_unit_counter_label.add_theme_constant_override("shadow_offset_y", 1)
+	_unit_counter_label.anchor_left = 1.0
+	_unit_counter_label.anchor_right = 1.0
+	_unit_counter_label.anchor_top = 0.0
+	_unit_counter_label.anchor_bottom = 0.0
+	_unit_counter_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_unit_counter_label.offset_top = 10
+	_unit_counter_label.offset_right = -10
+	_unit_counter_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	canvas.add_child(_unit_counter_label)
+
+
+func _update_unit_hud() -> void:
+	if _unit_name_label:
+		_unit_name_label.text = _unit_paths[_current_index].get_file()
+	if _unit_counter_label:
+		_unit_counter_label.text = "%d / %d" % [_current_index + 1, _unit_paths.size()]
 
 
 func _update_hud() -> void:

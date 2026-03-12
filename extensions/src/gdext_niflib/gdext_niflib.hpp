@@ -32,6 +32,11 @@
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/skin.hpp>
+#include <godot_cpp/classes/material.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/variant/color.hpp>
 
 //Standard Library
 #include <string>
@@ -71,7 +76,7 @@ public:
     // Applies NIF local transform (translation/rotation/scale) to a Godot Node3D.
     void apply_nif_transform(Niflib::NiAVObjectRef av_obj, Node3D* godot_node);
     // Builds a StandardMaterial3D from a NIF property list.
-    godot::Ref<godot::StandardMaterial3D> create_material_from_properties(
+    godot::Ref<godot::Material> create_material_from_properties(
         const std::vector<Niflib::Ref<Niflib::NiProperty>>& properties,
         bool has_vertex_colors,
         const String& base_path);
@@ -107,7 +112,14 @@ public:
     // Created once per skeleton via create_skin_from_rest_transforms(), shared across shapes.
     std::map<Niflib::NiNode*, godot::Ref<godot::Skin>> skin_cache;
 
-    // Returns NiObjectNET name if available, otherwise the NIF type name.
+    // --- Team color ---
+    // Applied at runtime to all meshes that carry a DARK_MAP (slot 1) mask texture.
+    // Defaults to white (no tinting). Set before calling load_nif_scene().
+    godot::Color team_color = godot::Color(1.0f, 1.0f, 1.0f, 1.0f);
+    void set_team_color(godot::Color c) { team_color = c; }
+    godot::Color get_team_color() const { return team_color; }
+
+        // Returns NiObjectNET name if available, otherwise the NIF type name.
     static std::string nif_display_name(const Niflib::NiObjectRef& obj);
 
 };

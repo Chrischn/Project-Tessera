@@ -38,6 +38,7 @@
 #include <godot_cpp/classes/surface_tool.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/sphere_mesh.hpp>
 #include <godot_cpp/classes/immediate_mesh.hpp>
 #include <godot_cpp/classes/label3d.hpp>
@@ -411,6 +412,9 @@ void GdextNiflib::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_nif_header", "file_path"), &GdextNiflib::get_nif_header);
     ClassDB::bind_method(D_METHOD("check_nif_version_code", "version_code"), &GdextNiflib::isValidNIFVersion);
     ClassDB::bind_method(D_METHOD("load_nif_scene", "file_path", "root", "base_path"), &GdextNiflib::load_nif_scene);
+    ClassDB::bind_method(D_METHOD("set_team_color", "color"), &GdextNiflib::set_team_color);
+    ClassDB::bind_method(D_METHOD("get_team_color"), &GdextNiflib::get_team_color);
+    ADD_PROPERTY(PropertyInfo(Variant::COLOR, "team_color"), "set_team_color", "get_team_color");
 }
 
 // Check if GDExtension is working correctly
@@ -625,7 +629,7 @@ void GdextNiflib::apply_nif_transform(NiAVObjectRef av_obj, Node3D* godot_node) 
 
 // Creates a Godot StandardMaterial3D from NIF property list.
 // Phase 3: material colors from NiMaterialProperty.
-godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
+godot::Ref<Material> GdextNiflib::create_material_from_properties(
     const std::vector<Niflib::Ref<NiProperty>>& properties,
     bool has_vertex_colors,
     const String& base_path)
@@ -636,6 +640,11 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
     NiMaterialPropertyRef mat_prop;
     NiAlphaPropertyRef alpha_prop;
     NiTexturingPropertyRef tex_prop;
+    // Captured for ShaderMaterial passthrough (populated in the blocks below)
+    float alpha_scissor_threshold_val = 0.0f;
+    godot::Ref<godot::ImageTexture> dark_map_tex;   // populated from TeamColor.bmp (BASE_MAP slot 0) when detected
+    godot::Ref<godot::ImageTexture> albedo_tex_ref;  // stored for direct ShaderMaterial transfer (avoids get_texture)
+    godot::Ref<godot::ImageTexture> normal_tex_ref;  // stored for direct ShaderMaterial transfer
 
     for (const auto& prop : properties) {
         if (prop == NULL) continue;
@@ -703,7 +712,9 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
                 std::transform(base_lower.begin(), base_lower.end(), base_lower.begin(), ::tolower);
                 if (base_lower.find("teamcolor") != std::string::npos) {
                     skip_base_map = true;
-                    UtilityFunctions::print("[TEX] Skipping TeamColor BASE_MAP, using DECAL_0 instead");
+                    dark_map_tex = load_dds_texture(base_path, base_name);  // TeamColor.bmp is the mask
+                    UtilityFunctions::print("[TEX] TeamColor mask loaded: ",
+                        String::utf8(base_name.c_str()));
                 }
             }
         }
@@ -717,6 +728,7 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
             if (albedo_desc.source == NULL || !albedo_desc.source->IsTextureExternal()) continue;
             auto tex = load_dds_texture(base_path, albedo_desc.source->GetTextureFileName());
             if (tex.is_valid()) {
+                albedo_tex_ref = tex;  // keep local ref for ShaderMaterial transfer
                 mat->set_texture(StandardMaterial3D::TEXTURE_ALBEDO, tex);
                 // Reset albedo color to white, preserving alpha.
                 // Godot multiplies albedo_color * albedo_texture. If the NIF material has
@@ -754,6 +766,7 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
             if (norm_desc.source != NULL && norm_desc.source->IsTextureExternal()) {
                 auto tex = load_dds_texture(base_path, norm_desc.source->GetTextureFileName());
                 if (tex.is_valid()) {
+                    normal_tex_ref = tex;  // keep local ref for ShaderMaterial transfer
                     mat->set_feature(StandardMaterial3D::FEATURE_NORMAL_MAPPING, true);
                     mat->set_texture(StandardMaterial3D::TEXTURE_NORMAL, tex);
                 }
@@ -770,6 +783,8 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
         unsigned short src_blend = alpha_prop->GetSourceBlendFunc();
         unsigned short dst_blend = alpha_prop->GetDestBlendFunc();
         unsigned int threshold = alpha_prop->GetTestThreshold();
+        // Capture threshold for ShaderMaterial if this shape later uses one
+        if (threshold > 0 && test) { alpha_scissor_threshold_val = threshold / 255.0f; }
 
         UtilityFunctions::print("[ALPHA] blend=", blend, " test=", test,
             " src=", src_blend, " dst=", dst_blend, " threshold=", threshold);
@@ -790,6 +805,37 @@ godot::Ref<StandardMaterial3D> GdextNiflib::create_material_from_properties(
 
     // Default cull mode (back-face culling enabled)
     mat->set_cull_mode(StandardMaterial3D::CULL_BACK);
+
+    // If a DARK_MAP mask was loaded, return a ShaderMaterial that performs
+    // the team-color blend.  Otherwise return the StandardMaterial3D as usual.
+    if (dark_map_tex.is_valid()) {
+        // Load shader once; ResourceLoader caches the resource.
+        static godot::Ref<godot::Shader> team_shader;
+        if (!team_shader.is_valid()) {
+            team_shader = ResourceLoader::get_singleton()->load(
+                "res://assets/shaders/unit_team_color.gdshader");
+        }
+        UtilityFunctions::print("[MAT] ShaderMaterial: shader_valid=", team_shader.is_valid(),
+            " albedo_valid=", albedo_tex_ref.is_valid(),
+            " dark_map_valid=", dark_map_tex.is_valid());
+        if (team_shader.is_valid()) {
+            godot::Ref<ShaderMaterial> smat;
+            smat.instantiate();
+            smat->set_shader(team_shader);
+            // Use locally-stored refs — avoids mat->get_texture() Variant conversion issues
+            if (albedo_tex_ref.is_valid())
+                smat->set_shader_parameter("albedo_texture", albedo_tex_ref);
+            smat->set_shader_parameter("dark_map", dark_map_tex);
+            smat->set_shader_parameter("team_color", team_color);
+            smat->set_shader_parameter("roughness",  (float)mat->get_roughness());
+            smat->set_shader_parameter("specular_intens", (float)mat->get_specular());
+            smat->set_shader_parameter("alpha_scissor_threshold", alpha_scissor_threshold_val);
+            smat->set_shader_parameter("has_normal_map", normal_tex_ref.is_valid());
+            if (normal_tex_ref.is_valid())
+                smat->set_shader_parameter("normal_texture", normal_tex_ref);
+            return smat;
+        }
+    }
 
     return mat;
 }
@@ -1004,7 +1050,7 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
 
     // Material from NIF properties
     std::vector<Niflib::Ref<NiProperty>> properties = tri_shape->GetProperties();
-    Ref<StandardMaterial3D> mat = create_material_from_properties(properties, has_colors, base_path);
+    Ref<Material> mat = create_material_from_properties(properties, has_colors, base_path);
     mesh_instance->set_surface_override_material(0, mat);
 
     if (is_skinned && skeleton != nullptr) {
@@ -1191,7 +1237,7 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
     mesh_instance->set_mesh(mesh);
 
     std::vector<Niflib::Ref<NiProperty>> properties = tri_strips->GetProperties();
-    Ref<StandardMaterial3D> mat = create_material_from_properties(properties, has_colors, base_path);
+    Ref<Material> mat = create_material_from_properties(properties, has_colors, base_path);
     mesh_instance->set_surface_override_material(0, mat);
 
     if (is_skinned && skeleton != nullptr) {
