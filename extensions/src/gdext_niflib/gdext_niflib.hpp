@@ -79,7 +79,8 @@ public:
     godot::Ref<godot::Material> create_material_from_properties(
         const std::vector<Niflib::Ref<Niflib::NiProperty>>& properties,
         bool has_vertex_colors,
-        const String& base_path);
+        const String& base_path,
+        const std::string& shape_name = "");
     // Loads a DDS/BMP/TGA texture via VFS (FPK archives + disk). Cached per NIF load.
     godot::Ref<godot::ImageTexture> load_dds_texture(const String& base_path, const std::string& nif_tex_path);
 

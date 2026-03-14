@@ -632,7 +632,8 @@ void GdextNiflib::apply_nif_transform(NiAVObjectRef av_obj, Node3D* godot_node) 
 godot::Ref<Material> GdextNiflib::create_material_from_properties(
     const std::vector<Niflib::Ref<NiProperty>>& properties,
     bool has_vertex_colors,
-    const String& base_path)
+    const String& base_path,
+    const std::string& shape_name)
 {
     godot::Ref<StandardMaterial3D> mat;
     mat.instantiate();
@@ -783,24 +784,34 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
         unsigned short src_blend = alpha_prop->GetSourceBlendFunc();
         unsigned short dst_blend = alpha_prop->GetDestBlendFunc();
         unsigned int threshold = alpha_prop->GetTestThreshold();
-        // Capture threshold for ShaderMaterial if this shape later uses one
-        if (threshold > 0 && test) { alpha_scissor_threshold_val = threshold / 255.0f; }
+        // Capture threshold for ShaderMaterial if this shape later uses one.
+        // Only when blend=false: blend=true means team-color mask, not cutout.
+        if (threshold > 0 && test && !blend) { alpha_scissor_threshold_val = threshold / 255.0f; }
 
-        UtilityFunctions::print("[ALPHA] blend=", blend, " test=", test,
-            " src=", src_blend, " dst=", dst_blend, " threshold=", threshold);
-
-        // threshold=0 with blend is typically env map blending in Civ IV, not real transparency
-        if (threshold > 0) {
-            if (blend && test) {
-                mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
-                mat->set_alpha_scissor_threshold(threshold / 255.0f);
-            } else if (test) {
-                mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
-                mat->set_alpha_scissor_threshold(threshold / 255.0f);
-            } else if (blend) {
-                mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
-            }
+        // Only apply ALPHA_SCISSOR for pure cutout shapes (blend=false, test=true).
+        // blend=true means Civ IV is using alpha for team-color blending — the DXT3 alpha
+        // channel stores a mask (0 = colorable area, 1 = base texture), not transparency.
+        // Applying ALPHA_SCISSOR there discards the colorable-area pixels and creates holes.
+        if (threshold > 0 && test && !blend) {
+            mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+            mat->set_alpha_scissor_threshold(threshold / 255.0f);
         }
+    }
+
+    // Log final transparency decision so broken shapes can be identified by name
+    {
+        String tmode = "DISABLED";
+        if (mat->get_transparency() == StandardMaterial3D::TRANSPARENCY_ALPHA_SCISSOR)
+            tmode = String("ALPHA_SCISSOR(") + String::num(mat->get_alpha_scissor_threshold(), 3) + ")";
+        else if (mat->get_transparency() == StandardMaterial3D::TRANSPARENCY_ALPHA)
+            tmode = "ALPHA";
+        String alpha_info = alpha_prop != NULL
+            ? (String(" blend=") + (alpha_prop->GetBlendState() ? "1" : "0")
+               + " test=" + (alpha_prop->GetTestState() ? "1" : "0")
+               + " threshold=" + String::num((int)alpha_prop->GetTestThreshold()))
+            : String(" (no NiAlphaProperty)");
+        UtilityFunctions::print("[MAT] '", String::utf8(shape_name.c_str()),
+            "' -> ", tmode, " albedo.a=", mat->get_albedo().a, alpha_info);
     }
 
     // Default cull mode (back-face culling enabled)
@@ -1027,14 +1038,14 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
         st->add_vertex(pos);
     }
 
-    // Triangle indices (swap v2/v3 to fix winding order after coordinate handedness change)
+    // Swap v2↔v3 to convert NIF winding to Godot's CCW front-face convention.
+    // Empirically verified: without swap the model renders inverted (back-facing).
     for (const auto& tri : triangles) {
         st->add_index(tri.v1);
         st->add_index(tri.v3);
         st->add_index(tri.v2);
     }
 
-    // Generate normals only if the NIF didn't provide them
     if (!has_normals) {
         st->generate_normals();
     }
@@ -1050,7 +1061,7 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
 
     // Material from NIF properties
     std::vector<Niflib::Ref<NiProperty>> properties = tri_shape->GetProperties();
-    Ref<Material> mat = create_material_from_properties(properties, has_colors, base_path);
+    Ref<Material> mat = create_material_from_properties(properties, has_colors, base_path, name);
     mesh_instance->set_surface_override_material(0, mat);
 
     if (is_skinned && skeleton != nullptr) {
@@ -1220,13 +1231,16 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
         st->add_vertex(pos);
     }
 
+    // Swap v2↔v3 for Godot CCW front-face convention (see NiTriShape comment).
     for (const auto& tri : triangles) {
         st->add_index(tri.v1);
         st->add_index(tri.v3);
         st->add_index(tri.v2);
     }
 
-    if (!has_normals) st->generate_normals();
+    if (!has_normals) {
+        st->generate_normals();
+    }
 
     Ref<ArrayMesh> mesh = st->commit();
     if (!mesh.is_valid()) return nullptr;
@@ -1237,7 +1251,7 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
     mesh_instance->set_mesh(mesh);
 
     std::vector<Niflib::Ref<NiProperty>> properties = tri_strips->GetProperties();
-    Ref<Material> mat = create_material_from_properties(properties, has_colors, base_path);
+    Ref<Material> mat = create_material_from_properties(properties, has_colors, base_path, name);
     mesh_instance->set_surface_override_material(0, mat);
 
     if (is_skinned && skeleton != nullptr) {

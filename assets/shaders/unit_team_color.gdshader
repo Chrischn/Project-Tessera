@@ -16,7 +16,7 @@
 // passing it without changes, but it is not used in the blend calculation.
 // =============================================================================
 shader_type spatial;
-render_mode blend_mix;
+render_mode cull_back;
 
 // DECAL_0 — actual unit diffuse texture, DXT3 alpha = team-color mask
 uniform sampler2D albedo_texture  : source_color, filter_linear_mipmap;
@@ -30,8 +30,6 @@ uniform bool has_normal_map = false;
 uniform vec4  team_color               : source_color = vec4(1.0, 1.0, 1.0, 1.0);
 uniform float roughness                : hint_range(0.0, 1.0) = 0.5;
 uniform float specular_intens          : hint_range(0.0, 1.0) = 0.5;
-// > 0 activates alpha-scissor (cutout transparency); 0 = disabled.
-uniform float alpha_scissor_threshold  : hint_range(0.0, 1.0) = 0.0;
 
 void fragment() {
     vec4 base = texture(albedo_texture, UV);
@@ -40,15 +38,12 @@ void fragment() {
     //   0.0 → cloth/fabric → show team_color
     //   1.0 → armor/horse  → show base.rgb
     ALBEDO    = mix(team_color.rgb, base.rgb, base.a);
-    ALPHA     = 1.0;   // mesh is always opaque; alpha was the mask, not transparency
+    // No ALPHA write — mesh is always opaque.  Writing ALPHA (even 1.0)
+    // would push the mesh into Godot's transparent pipeline, breaking depth.
     ROUGHNESS = roughness;
     SPECULAR  = specular_intens;
 
     if (has_normal_map) {
         NORMAL_MAP = texture(normal_texture, UV).rgb;
-    }
-
-    if (alpha_scissor_threshold > 0.0 && ALPHA < alpha_scissor_threshold) {
-        discard;
     }
 }
