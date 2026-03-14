@@ -39,7 +39,14 @@ var _debug_mode_names: Array[String] = [
 var _debug_hud_label: Label = null
 var _unit_name_label: Label = null
 var _unit_counter_label: Label = null
+var _keybinds_label: Label = null
 var _grid_node: MeshInstance3D = null
+
+# Animation playback (press P)
+var _anim_player: AnimationPlayer = null
+var _anim_clip_names: Array[StringName] = []
+var _anim_clip_index: int = 0
+var _anim_hud_label: Label = null
 
 # Material override diagnostic (press T)
 var _material_override_active := false
@@ -73,6 +80,19 @@ func _unhandled_input(event: InputEvent) -> void:
 			_cycle_debug_mode()
 		KEY_T:
 			_toggle_material_override()
+		KEY_P:
+			_cycle_animation()
+
+
+func _cycle_animation() -> void:
+	if not _anim_player or _anim_clip_names.is_empty():
+		print("UnitCycler: no AnimationPlayer / clips on this unit")
+		return
+	_anim_clip_index = (_anim_clip_index + 1) % _anim_clip_names.size()
+	var clip: String = _anim_clip_names[_anim_clip_index]
+	_anim_player.play(clip)
+	_update_anim_hud()
+	print("UnitCycler [ANIM]: playing '%s'" % clip)
 
 
 func _cycle(direction: int) -> void:
@@ -99,12 +119,39 @@ func _load_unit(index: int) -> void:
 	get_parent().add_child(container)
 	_unit_container = container
 
+	# Extract .kfm and .kf files to disk so build_animations() can find them
+	# alongside the .nif (they may be packed inside FPK archives)
+	var unit_dir := nif_path.get_base_dir()
+	for kfm_path in VFS.find_files(unit_dir, "kfm"):
+		VFS.get_file_as_disk_path(kfm_path)
+	for kf_path in VFS.find_files(unit_dir, "kf"):
+		VFS.get_file_as_disk_path(kf_path)
+
 	var niflib := GdextNiflib.new()
 	# TODO: drive team_color from game state (player civilization color).
 	# Blue used here as a visible test value; white = no tinting.
 	niflib.team_color = Color(0.2, 0.4, 1.0)
 	niflib.load_nif_scene(disk_path, container, _base_path)
 	print("UnitCycler [%d/%d]: %s" % [index + 1, _unit_paths.size(), nif_path])
+
+	_anim_player = null
+	_anim_clip_names = []
+	_anim_clip_index = 0
+	_anim_player = _find_animation_player(container)
+	if _anim_player:
+		var lib := _anim_player.get_animation_library("")
+		if lib:
+			_anim_clip_names = Array(lib.get_animation_list())
+			_anim_clip_names.sort()
+		if not _anim_clip_names.is_empty():
+			_anim_player.play(_anim_clip_names[0])
+			print("UnitCycler [ANIM]: auto-playing '%s' (%d clips)" \
+				% [_anim_clip_names[0], _anim_clip_names.size()])
+		else:
+			print("UnitCycler [ANIM]: AnimationPlayer present but no clips")
+	else:
+		print("UnitCycler [ANIM]: no AnimationPlayer (static model)")
+	_update_anim_hud()
 	_apply_debug_mode()
 	if _material_override_active:
 		_apply_override_recursive(_unit_container, _make_diagnostic_mat())
@@ -178,6 +225,16 @@ func _apply_debug_mode() -> void:
 	# Show grid only in mode 7
 	if _grid_node:
 		_grid_node.visible = (_debug_mode == 7)
+
+
+func _find_animation_player(node: Node) -> AnimationPlayer:
+	if node is AnimationPlayer:
+		return node
+	for child in node.get_children():
+		var found := _find_animation_player(child)
+		if found:
+			return found
+	return null
 
 
 func _find_nodes_by_name(root: Node, target_name: String) -> Array[Node]:
@@ -294,6 +351,49 @@ func _setup_debug_hud() -> void:
 	_debug_hud_label.offset_bottom = -10
 	canvas.add_child(_debug_hud_label)
 
+	# Bottom-right: current animation clip
+	_anim_hud_label = Label.new()
+	_anim_hud_label.add_theme_font_size_override("font_size", 18)
+	_anim_hud_label.add_theme_color_override("font_color", Color.WHITE)
+	_anim_hud_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	_anim_hud_label.add_theme_constant_override("shadow_offset_x", 1)
+	_anim_hud_label.add_theme_constant_override("shadow_offset_y", 1)
+	_anim_hud_label.anchor_left   = 1.0
+	_anim_hud_label.anchor_right  = 1.0
+	_anim_hud_label.anchor_top    = 1.0
+	_anim_hud_label.anchor_bottom = 1.0
+	_anim_hud_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_anim_hud_label.grow_vertical   = Control.GROW_DIRECTION_BEGIN
+	_anim_hud_label.offset_right  = -10
+	_anim_hud_label.offset_bottom = -10
+	_anim_hud_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	canvas.add_child(_anim_hud_label)
+
+	# Left side: keybindings legend
+	_keybinds_label = Label.new()
+	_keybinds_label.text = \
+		"J / L    Prev / Next unit\n" + \
+		"P        Next animation clip\n" + \
+		"I         Cycle debug mode\n" + \
+		"T        Material override\n" + \
+		"WASD  Move   Shift  Sprint\n" + \
+		"Mouse  Look\n" + \
+		"Space / Ctrl  Up / Down\n" + \
+		"Esc     Show cursor"
+	_keybinds_label.add_theme_font_size_override("font_size", 14)
+	_keybinds_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.6))
+	_keybinds_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	_keybinds_label.add_theme_constant_override("shadow_offset_x", 1)
+	_keybinds_label.add_theme_constant_override("shadow_offset_y", 1)
+	_keybinds_label.anchor_left = 0.0
+	_keybinds_label.anchor_right = 0.0
+	_keybinds_label.anchor_top = 0.5
+	_keybinds_label.anchor_bottom = 0.5
+	_keybinds_label.grow_horizontal = Control.GROW_DIRECTION_END
+	_keybinds_label.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_keybinds_label.offset_left = 10
+	canvas.add_child(_keybinds_label)
+
 	# Top-center: current unit filename
 	_unit_name_label = Label.new()
 	_unit_name_label.add_theme_font_size_override("font_size", 20)
@@ -333,6 +433,17 @@ func _update_unit_hud() -> void:
 		_unit_name_label.text = _unit_paths[_current_index].get_file()
 	if _unit_counter_label:
 		_unit_counter_label.text = "%d / %d" % [_current_index + 1, _unit_paths.size()]
+
+
+func _update_anim_hud() -> void:
+	if not _anim_hud_label:
+		return
+	if _anim_clip_names.is_empty():
+		_anim_hud_label.text = "[P] No animations"
+	else:
+		_anim_hud_label.text = "[P] %s  (%d/%d)" \
+			% [_anim_clip_names[_anim_clip_index],
+			   _anim_clip_index + 1, _anim_clip_names.size()]
 
 
 func _update_hud() -> void:

@@ -14,6 +14,8 @@
 #include <obj/NiNode.h>
 #include <obj/NiTriShape.h>
 #include <obj/NiTriStrips.h>
+#include <obj/NiTriBasedGeom.h>
+#include <obj/NiTriBasedGeomData.h>
 #include <obj/NiAVObject.h>
 #include <obj/NiProperty.h>
 #include <obj/NiSkinInstance.h>
@@ -33,6 +35,9 @@
 #include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/material.hpp>
+#include <godot_cpp/classes/animation.hpp>
+#include <godot_cpp/classes/animation_player.hpp>
+#include <godot_cpp/classes/animation_library.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -65,11 +70,21 @@ public:
     // All per-NIF state is cleared after this returns.
     void load_nif_scene(const String& file_path, Node3D* godotnode, const String& base_path);
 
+    // --- Animation ---
+    // Loads .kfm / .kf animation data alongside the NIF, builds an AnimationPlayer and
+    // adds it as a child of root_godot_node.  No-op (prints diagnostic) if no .kfm exists.
+    // Must be called after process_ni_node() so skeleton_cache is populated.
+    void build_animations(const godot::String& nif_path,
+                          const godot::String& base_path,
+                          godot::Node3D* root_godot_node);
+
     // --- Scene graph traversal ---
     // Recursively maps NiNode hierarchy to Node3D hierarchy.
     void process_ni_node(Niflib::NiNodeRef ni_node, Node3D* parent_godot, const String& base_path);
+    // Shared geometry builder for NiTriShape and NiTriStrips (both are NiTriBasedGeom).
+    // Handles SurfaceTool build, skinning, material, and transform. Called by the two wrappers below.
+    Node3D* process_tri_geometry(Niflib::NiTriBasedGeomRef geom, const String& base_path, Skeleton3D* skeleton = nullptr);
     // Builds a MeshInstance3D from a NiTriShape (triangle list).
-    // Pass skeleton != nullptr to enable skinning weight assignment.
     Node3D* process_ni_tri_shape(Niflib::NiTriShapeRef tri_shape, const String& base_path, Skeleton3D* skeleton = nullptr);
     // Builds a MeshInstance3D from a NiTriStrips (triangle strip, converted to triangles).
     Node3D* process_ni_tri_strips(Niflib::NiTriStripsRef tri_strips, const String& base_path, Skeleton3D* skeleton = nullptr);
@@ -112,6 +127,11 @@ public:
     // Maps NIF skeleton root NiNode* -> explicit Skin resource (inverse-rest bind poses).
     // Created once per skeleton via create_skin_from_rest_transforms(), shared across shapes.
     std::map<Niflib::NiNode*, godot::Ref<godot::Skin>> skin_cache;
+    // Per-bone correction transform: maps NIF-parent-local animation space → Godot bone-parent-local space.
+    // Needed because the Godot skeleton may skip intermediate NIF nodes when establishing
+    // parent-child relationships, so animation data (relative to NIF parent) differs from
+    // what Godot expects (relative to Godot parent bone).
+    std::map<std::string, godot::Transform3D> bone_anim_correction;
 
     // --- Team color ---
     // Applied at runtime to all meshes that carry a DARK_MAP (slot 1) mask texture.
