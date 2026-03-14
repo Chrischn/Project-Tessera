@@ -6,11 +6,34 @@
 //   - Coordinate system conversion (NIF left-handed Z-up -> Godot right-handed Y-up)
 //   - Scene graph traversal: NiNode hierarchy -> Godot Node3D hierarchy
 //   - Geometry processing: NiTriShape / NiTriStrips -> ArrayMesh (via SurfaceTool)
-//   - Material and texture loading: NiProperty set -> StandardMaterial3D
+//   - Material and texture loading: NiProperty set -> StandardMaterial3D or ShaderMaterial
 //   - Skeletal skinning: NiSkinInstance -> Skeleton3D + Skin resource
 //
 // Key NIF types used: NiNode, NiTriShape, NiTriStrips, NiSkinInstance, NiSkinData,
 //   NiTexturingProperty, NiMaterialProperty, NiAlphaProperty, NiVertexColorProperty.
+//
+// --- Coordinate system ---
+//   NIF:   left-handed,  X-right, Y-forward, Z-up
+//   Godot: right-handed, X-right, Y-up,      Z-backward
+//   Mapping: Godot(x, y, z) = NIF(x, z, -y)
+//   Rotations: R_godot = P * R_nif * P^T  (see nif_matrix33_to_godot)
+//
+// --- Winding order ---
+//   The handedness change reverses which triangle winding is "front-facing".
+//   NIF CW front-face must become Godot CCW front-face.
+//   Fix: swap v2↔v3 in every triangle's index list.
+//
+// --- Geometry paths ---
+//   1. Static mesh:   vertices transformed by node's local transform (apply_nif_transform)
+//   2. Skinned mesh:  MeshInstance3D at identity under Skeleton3D;
+//                     geometry's local transform baked into vertex positions
+//   3. Team-color:    ShaderMaterial with team_color uniform; DXT3 alpha
+//                     used as blend mask (NOT transparency)
+//
+// --- Shader ALPHA gotcha ---
+//   Never write ALPHA in a Godot spatial shader for opaque meshes.
+//   Even ALPHA = 1.0 pushes the mesh into the transparent render pipeline,
+//   which has no depth prepass → incorrect face sorting → see-through artifacts.
 // =============================================================================
 #include "gdext_niflib.hpp"
 
@@ -57,40 +80,87 @@ using namespace Niflib;
 // NIF (Civ IV v20.0.0.4): left-handed, Z-up, Y-forward
 // Godot:                  right-handed, Y-up, Z-backward
 //
-// Per-component mapping: Godot(x, y, z) = NIF(x, z, -y)
-// Applied to all vertex positions, normals, and translation vectors.
-// Rotation matrices use: R_godot = P * R_nif * P^T  (see nif_matrix44_to_godot)
-// Winding order fix: triangle indices v2/v3 are swapped (handedness flip reverses
-// front face direction; swap restores correct CCW winding for Godot).
+// Per-component mapping:
+//   Godot(x, y, z) = NIF(x, z, -y)
+//
+// Applied to: vertex positions, normals, and translation vectors.
+//
+// Rotation matrices:
+//   R_godot = P * R_nif * P^T
+//   where P is the permutation matrix | 1  0  0 |
+//                                      | 0  0  1 |
+//                                      | 0 -1  0 |
+//   This is NOT a simple component swap; the full conjugation accounts for
+//   how rotations interact with the axis remapping.
+//
+// Winding order:
+//   The handedness change (left → right) reverses which triangle winding is
+//   considered "front-facing".  NIF uses CW front-face; Godot uses CCW.
+//   Fix: swap v2↔v3 in every triangle's index list.
+//   Without this swap, all meshes render inside-out (backfaces visible,
+//   frontfaces culled by cull_back).
+//
+// Shader ALPHA gotcha:
+//   Never write ALPHA in a Godot spatial shader for opaque meshes.  Even
+//   ALPHA = 1.0 causes Godot to route the mesh through the transparent
+//   render pipeline, which has no depth prepass and uses painter's-algorithm
+//   sorting.  This produces see-through artifacts on complex geometry.
+
 static godot::Vector3 nif_to_godot_vec3(const Niflib::Vector3& v) {
     return godot::Vector3(v.x, v.z, -v.y);
 }
 
-// Converts a NIF Matrix44 (4x4 transform) to a Godot Transform3D with coordinate system conversion.
-godot::Transform3D GdextNiflib::nif_matrix44_to_godot(const Niflib::Matrix44& mat) {
-    // Extract the 3x3 rotation and translation from Matrix44
-    Niflib::Matrix33 r;
-    Niflib::Vector3 t;
-    float scale;
-    mat.Decompose(t, r, scale);
+// Converts a NIF Matrix33 rotation to a Godot Basis via R_godot = P * R_nif * P^T.
+// Used by nif_matrix44_to_godot(), apply_nif_transform(), and skinned geometry paths.
+static godot::Basis nif_matrix33_to_godot(const Niflib::Matrix33& r) {
+    godot::Basis b;
+    b.set_column(0, godot::Vector3( r[0][0],  r[2][0], -r[1][0]));  // X column
+    b.set_column(1, godot::Vector3( r[0][2],  r[2][2], -r[1][2]));  // Y column (was Z)
+    b.set_column(2, godot::Vector3(-r[0][1], -r[2][1],  r[1][1]));  // Z column (was -Y)
+    return b;
+}
 
-    // Convert translation
-    godot::Vector3 origin = nif_to_godot_vec3(t);
-
-    // Convert rotation (same formula as apply_nif_transform: R_godot = P * R_nif * P^T)
-    godot::Basis basis;
-    basis.set_column(0, godot::Vector3( r[0][0],  r[2][0], -r[1][0]));
-    basis.set_column(1, godot::Vector3( r[0][2],  r[2][2], -r[1][2]));
-    basis.set_column(2, godot::Vector3(-r[0][1], -r[2][1],  r[1][1]));
-
-    // Apply uniform scale
+// Applies uniform scale to a Basis (all three column vectors).
+static void apply_uniform_scale(godot::Basis& basis, float scale) {
     if (std::abs(scale - 1.0f) > 0.0001f) {
         basis.set_column(0, basis.get_column(0) * scale);
         basis.set_column(1, basis.get_column(1) * scale);
         basis.set_column(2, basis.get_column(2) * scale);
     }
+}
+
+// Converts a NIF Matrix44 (4x4 transform) to a Godot Transform3D.
+godot::Transform3D GdextNiflib::nif_matrix44_to_godot(const Niflib::Matrix44& mat) {
+    Niflib::Matrix33 r;
+    Niflib::Vector3 t;
+    float scale;
+    mat.Decompose(t, r, scale);
+
+    godot::Vector3 origin = nif_to_godot_vec3(t);
+    godot::Basis basis = nif_matrix33_to_godot(r);
+    apply_uniform_scale(basis, scale);
 
     return godot::Transform3D(basis, origin);
+}
+
+// Normalizes per-vertex bone weights for Godot GPU skinning (max 4 influences).
+// Sorts by weight descending, truncates to 4, pads with zeros, re-normalizes sum to 1.0.
+static void normalize_bone_weights(
+    std::vector<std::vector<std::pair<int, float>>>& vertex_weights)
+{
+    for (auto& vw : vertex_weights) {
+        std::sort(vw.begin(), vw.end(),
+            [](const std::pair<int,float>& a, const std::pair<int,float>& b) {
+                return a.second > b.second;
+            });
+        if (vw.size() > 4) vw.resize(4);
+        while (vw.size() < 4) vw.push_back({0, 0.0f});
+        float sum = 0.0f;
+        for (auto& p : vw) sum += p.second;
+        if (sum > 0.0001f) {
+            for (auto& p : vw) p.second /= sum;
+        }
+    }
 }
 
 // =============================================================================
@@ -616,19 +686,22 @@ void GdextNiflib::apply_nif_transform(NiAVObjectRef av_obj, Node3D* godot_node) 
     float s = av_obj->GetLocalScale();
     godot_node->set_scale(godot::Vector3(s, s, s));
 
-    // Rotation: NIF Matrix33 -> Godot Basis
-    // Coordinate transform: R_godot = P * R_nif * P^T
-    // where P swaps Y<->Z and negates new Z.
-    Niflib::Matrix33 r = av_obj->GetLocalRotation();
-    godot::Basis basis;
-    basis.set_column(0, godot::Vector3( r[0][0],  r[2][0], -r[1][0]));  // X column
-    basis.set_column(1, godot::Vector3( r[0][2],  r[2][2], -r[1][2]));  // Y column (was Z)
-    basis.set_column(2, godot::Vector3(-r[0][1], -r[2][1],  r[1][1]));  // Z column (was -Y)
-    godot_node->set_basis(basis);
+    // Rotation: NIF Matrix33 -> Godot Basis via shared helper
+    godot_node->set_basis(nif_matrix33_to_godot(av_obj->GetLocalRotation()));
 }
 
-// Creates a Godot StandardMaterial3D from NIF property list.
-// Phase 3: material colors from NiMaterialProperty.
+// =============================================================================
+// Material creation
+// =============================================================================
+// Builds a Godot material from a NIF shape's property list.
+// Five sections:
+//   1. NiMaterialProperty  → diffuse/emissive/specular/roughness
+//   2. Vertex colors        → flag for SRGB vertex color blending
+//   3. NiTexturingProperty  → albedo, gloss, normal, and team-color textures
+//   4. NiAlphaProperty      → transparency mode (scissor, blend, or opaque)
+//   5. Team-color shader    → ShaderMaterial when TeamColor.bmp is detected
+//
+// Returns StandardMaterial3D for normal meshes, ShaderMaterial for team-color.
 godot::Ref<Material> GdextNiflib::create_material_from_properties(
     const std::vector<Niflib::Ref<NiProperty>>& properties,
     bool has_vertex_colors,
@@ -654,8 +727,8 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
         if (auto t = DynamicCast<NiTexturingProperty>(prop)) tex_prop = t;
     }
 
+    // ---- Section 1: NiMaterialProperty colors ----
     if (mat_prop) {
-        // Diffuse color + alpha
         Niflib::Color3 diff = mat_prop->GetDiffuseColor();
         float alpha = mat_prop->GetTransparency();  // 1.0 = opaque
         UtilityFunctions::print("[MAT] diffuse=(", diff.r, ",", diff.g, ",", diff.b,
@@ -682,23 +755,22 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
         mat->set_specular(spec_intensity);
     }
 
-    // Vertex colors
+    // ---- Section 2: Vertex colors ----
     if (has_vertex_colors) {
         mat->set_flag(StandardMaterial3D::FLAG_SRGB_VERTEX_COLOR, true);
     }
 
-    // Phase 4: Textures from NiTexturingProperty
+    // ---- Section 3: NiTexturingProperty textures ----
     if (tex_prop != NULL) {
-        // Dump all texture slots for debugging
+        // Log only slots that have textures (not all 12)
         const char* slot_names[] = {"BASE_MAP","DARK_MAP","DETAIL_MAP","GLOSS_MAP",
             "GLOW_MAP","BUMP_MAP","NORMAL_MAP","UNKNOWN2","DECAL_0","DECAL_1","DECAL_2","DECAL_3"};
         for (int s = 0; s < 12; ++s) {
-            if (tex_prop->HasTexture(s)) {
-                TexDesc td = tex_prop->GetTexture(s);
-                String fname = (td.source != NULL && td.source->IsTextureExternal())
-                    ? String::utf8(td.source->GetTextureFileName().c_str()) : String("(internal)");
-                UtilityFunctions::print("[TEX] slot ", s, " (", slot_names[s], "): ", fname);
-            }
+            if (!tex_prop->HasTexture(s)) continue;
+            TexDesc td = tex_prop->GetTexture(s);
+            String fname = (td.source != NULL && td.source->IsTextureExternal())
+                ? String::utf8(td.source->GetTextureFileName().c_str()) : String("(internal)");
+            UtilityFunctions::print("[TEX] slot ", s, " (", slot_names[s], "): ", fname);
         }
 
         // Albedo texture priority: DECAL_0 (8) if BASE_MAP is TeamColor, else BASE_MAP (0) > DETAIL_MAP (2) > DECAL_0 (8)
@@ -757,9 +829,11 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
                 }
             }
         }
-        // GLOW_MAP (slot 4) — skipped.
-        // Civ IV uses this slot for environment/reflection maps, not emission.
-        // TODO: revisit when environment mapping is implemented.
+        // GLOW_MAP (slot 4) — Civ IV uses this for environment/reflection maps,
+        // not emission.  Skipped until environment mapping is implemented.
+        if (tex_prop->HasTexture(4)) {
+            UtilityFunctions::print("[TEX] GLOW_MAP (slot 4) skipped — environment mapping not yet implemented");
+        }
         // BUMP_MAP (slot 5) or NORMAL_MAP (slot 6) -> normal map
         int normal_slot = tex_prop->HasTexture(6) ? 6 : (tex_prop->HasTexture(5) ? 5 : -1);
         if (normal_slot >= 0) {
@@ -777,7 +851,7 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
         UtilityFunctions::print("[TEX] No NiTexturingProperty on this shape");
     }
 
-    // Phase 5: Alpha / Transparency from NiAlphaProperty
+    // ---- Section 4: NiAlphaProperty transparency ----
     if (alpha_prop != NULL) {
         bool blend = alpha_prop->GetBlendState();
         bool test = alpha_prop->GetTestState();
@@ -817,8 +891,9 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
     // Default cull mode (back-face culling enabled)
     mat->set_cull_mode(StandardMaterial3D::CULL_BACK);
 
-    // If a DARK_MAP mask was loaded, return a ShaderMaterial that performs
-    // the team-color blend.  Otherwise return the StandardMaterial3D as usual.
+    // ---- Section 5: Team-color shader detection ----
+    // If a DARK_MAP mask (TeamColor.bmp) was loaded, return a ShaderMaterial
+    // that performs the team-color blend.  Otherwise return StandardMaterial3D.
     if (dark_map_tex.is_valid()) {
         // Load shader once; ResourceLoader caches the resource.
         static godot::Ref<godot::Shader> team_shader;
@@ -901,24 +976,16 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
             is_skinned = true;
             vertex_weights.resize(vertices.size());
 
-            // Build the geometry's local transform (same components as apply_nif_transform)
+            // Build the geometry's local transform using shared helpers.
             {
                 NiAVObjectRef av = StaticCast<NiAVObject>(tri_shape);
                 Niflib::Vector3 gt = av->GetLocalTranslation();
                 Niflib::Matrix33 gr = av->GetLocalRotation();
                 float gs = av->GetLocalScale();
 
-                godot::Vector3 origin = nif_to_godot_vec3(gt);
-                godot::Basis basis;
-                basis.set_column(0, godot::Vector3( gr[0][0],  gr[2][0], -gr[1][0]));
-                basis.set_column(1, godot::Vector3( gr[0][2],  gr[2][2], -gr[1][2]));
-                basis.set_column(2, godot::Vector3(-gr[0][1], -gr[2][1],  gr[1][1]));
-                if (std::abs(gs - 1.0f) > 0.0001f) {
-                    basis.set_column(0, basis.get_column(0) * gs);
-                    basis.set_column(1, basis.get_column(1) * gs);
-                    basis.set_column(2, basis.get_column(2) * gs);
-                }
-                skin_vertex_transform = godot::Transform3D(basis, origin);
+                godot::Basis basis = nif_matrix33_to_godot(gr);
+                apply_uniform_scale(basis, gs);
+                skin_vertex_transform = godot::Transform3D(basis, nif_to_godot_vec3(gt));
             }
             UtilityFunctions::print("[SKIN] geom_local origin=(",
                 skin_vertex_transform.origin.x, ", ",
@@ -928,7 +995,7 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
             std::vector<NiNodeRef> bones = skin->GetBones();
             unsigned int bone_count = skin_data->GetBoneCount();
 
-            // Invert per-bone weights to per-vertex
+            // Invert NIF's per-bone weight lists to per-vertex weight lists
             for (unsigned int b = 0; b < bone_count; ++b) {
                 NiNodeRef bone_node = (b < bones.size()) ? bones[b] : NiNodeRef();
                 if (bone_node == NULL) continue;
@@ -945,38 +1012,14 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
                 }
             }
 
-            // Godot GPU skinning supports exactly 4 influences per vertex.
-            // Sort descending, truncate to 4, pad with zeros, re-normalize to sum=1.
-            for (auto& vw : vertex_weights) {
-                std::sort(vw.begin(), vw.end(),
-                    [](const std::pair<int,float>& a, const std::pair<int,float>& b) {
-                        return a.second > b.second;
-                    });
-                // Keep top 4
-                if (vw.size() > 4) vw.resize(4);
-                // Pad to 4
-                while (vw.size() < 4) vw.push_back({0, 0.0f});
-                // Normalize
-                float sum = 0.0f;
-                for (auto& p : vw) sum += p.second;
-                if (sum > 0.0001f) {
-                    for (auto& p : vw) p.second /= sum;
-                }
-            }
+            normalize_bone_weights(vertex_weights);
 
-            // Diagnostic: count vertices with non-zero weights from NiSkinData
+            // Diagnostic: count vertices with non-zero weights
             unsigned int verts_with_weights = 0;
-            unsigned int total_weight_entries = 0;
             for (const auto& vw : vertex_weights) {
                 for (const auto& p : vw) {
-                    if (p.second > 0.0001f) { ++total_weight_entries; break; }
+                    if (p.second > 0.0001f) { ++verts_with_weights; break; }
                 }
-                // Count separately
-                bool has_any = false;
-                for (const auto& p : vw) {
-                    if (p.second > 0.0001f) { has_any = true; break; }
-                }
-                if (has_any) ++verts_with_weights;
             }
             NiSkinPartitionRef skin_part = skin->GetSkinPartition();
             UtilityFunctions::print("[SKIN] shape=\"",
@@ -1038,14 +1081,24 @@ Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String&
         st->add_vertex(pos);
     }
 
-    // Swap v2↔v3 to convert NIF winding to Godot's CCW front-face convention.
-    // Empirically verified: without swap the model renders inverted (back-facing).
+    // --- Triangle winding ---
+    // NIF (left-handed) uses CW front-face; Godot (right-handed) uses CCW.
+    // The coordinate conversion nif_to_godot_vec3 preserves cross products
+    // (det=+1, orthogonal) but the handedness change reverses which winding
+    // is "front".  Swapping v2↔v3 converts CW → CCW.
+    // Without this swap, all meshes render inside-out (backfaces visible).
+    //
+    // Confirmed via diagnostic on artillery.nif (478 tris, dot>=0 for all):
+    // NIF winding is consistent; swap is universally needed.
     for (const auto& tri : triangles) {
         st->add_index(tri.v1);
         st->add_index(tri.v3);
         st->add_index(tri.v2);
     }
 
+    // Only generate normals if the NIF didn't provide them.
+    // NIF normals are already correct; unconditional generate_normals()
+    // overrides them and can produce inverted lighting.
     if (!has_normals) {
         st->generate_normals();
     }
@@ -1123,29 +1176,22 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
             is_skinned = true;
             vertex_weights.resize(vertices.size());
 
-            // Build the geometry's local transform (same as apply_nif_transform)
+            // Build the geometry's local transform using shared helpers.
             {
                 NiAVObjectRef av = StaticCast<NiAVObject>(tri_strips);
                 Niflib::Vector3 gt = av->GetLocalTranslation();
                 Niflib::Matrix33 gr = av->GetLocalRotation();
                 float gs = av->GetLocalScale();
 
-                godot::Vector3 origin = nif_to_godot_vec3(gt);
-                godot::Basis basis;
-                basis.set_column(0, godot::Vector3( gr[0][0],  gr[2][0], -gr[1][0]));
-                basis.set_column(1, godot::Vector3( gr[0][2],  gr[2][2], -gr[1][2]));
-                basis.set_column(2, godot::Vector3(-gr[0][1], -gr[2][1],  gr[1][1]));
-                if (std::abs(gs - 1.0f) > 0.0001f) {
-                    basis.set_column(0, basis.get_column(0) * gs);
-                    basis.set_column(1, basis.get_column(1) * gs);
-                    basis.set_column(2, basis.get_column(2) * gs);
-                }
-                skin_vertex_transform = godot::Transform3D(basis, origin);
+                godot::Basis basis = nif_matrix33_to_godot(gr);
+                apply_uniform_scale(basis, gs);
+                skin_vertex_transform = godot::Transform3D(basis, nif_to_godot_vec3(gt));
             }
 
             std::vector<NiNodeRef> bones = skin->GetBones();
             unsigned int bone_count = skin_data->GetBoneCount();
 
+            // Invert NIF's per-bone weight lists to per-vertex weight lists
             for (unsigned int b = 0; b < bone_count; ++b) {
                 NiNodeRef bone_node = (b < bones.size()) ? bones[b] : NiNodeRef();
                 if (bone_node == NULL) continue;
@@ -1161,26 +1207,12 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
                 }
             }
 
-            // Godot GPU skinning supports exactly 4 influences per vertex.
-            // Sort descending, truncate to 4, pad with zeros, re-normalize to sum=1.
-            for (auto& vw : vertex_weights) {
-                std::sort(vw.begin(), vw.end(),
-                    [](const std::pair<int,float>& a, const std::pair<int,float>& b) {
-                        return a.second > b.second;
-                    });
-                if (vw.size() > 4) vw.resize(4);
-                while (vw.size() < 4) vw.push_back({0, 0.0f});
-                float sum = 0.0f;
-                for (auto& p : vw) sum += p.second;
-                if (sum > 0.0001f) {
-                    for (auto& p : vw) p.second /= sum;
-                }
-            }
+            normalize_bone_weights(vertex_weights);
 
-            // Diagnostic: count vertices with non-zero weights from NiSkinData
+            // Diagnostic: count vertices with non-zero weights
             unsigned int verts_with_weights = 0;
-            for (const auto& vw2 : vertex_weights) {
-                for (const auto& p : vw2) {
+            for (const auto& vw : vertex_weights) {
+                for (const auto& p : vw) {
                     if (p.second > 0.0001f) { ++verts_with_weights; break; }
                 }
             }
@@ -1231,13 +1263,14 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
         st->add_vertex(pos);
     }
 
-    // Swap v2↔v3 for Godot CCW front-face convention (see NiTriShape comment).
+    // Swap v2↔v3: NIF CW → Godot CCW front-face (see NiTriShape comment).
     for (const auto& tri : triangles) {
         st->add_index(tri.v1);
         st->add_index(tri.v3);
         st->add_index(tri.v2);
     }
 
+    // Only generate normals if the NIF didn't provide them (see NiTriShape comment).
     if (!has_normals) {
         st->generate_normals();
     }
