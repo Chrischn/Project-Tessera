@@ -872,10 +872,17 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
                 }
             }
         }
-        // GLOW_MAP (slot 4) — Civ IV uses this for environment/reflection maps,
-        // not emission.  Skipped until environment mapping is implemented.
+        // GLOW_MAP (slot 4) — environment / reflection map.
+        // Despite the name, Civ IV uses this slot for environment reflections (e.g.
+        // Environment_FX_GreyMetal.dds), NOT for self-illumination. Correct rendering
+        // requires cubemap sampling with reflected view direction (as NifSkope does).
+        // Skipped until a reflection shader is implemented.
         if (tex_prop->HasTexture(4)) {
-            UtilityFunctions::print("[TEX] GLOW_MAP (slot 4) skipped — environment mapping not yet implemented");
+            TexDesc glow_desc = tex_prop->GetTexture(4);
+            std::string glow_name = (glow_desc.source != NULL && glow_desc.source->IsTextureExternal())
+                ? glow_desc.source->GetTextureFileName() : "(internal)";
+            UtilityFunctions::print("[TEX] GLOW_MAP (slot 4) skipped (environment map): ",
+                String::utf8(glow_name.c_str()));
         }
         // BUMP_MAP (slot 5) or NORMAL_MAP (slot 6) -> normal map
         int normal_slot = tex_prop->HasTexture(6) ? 6 : (tex_prop->HasTexture(5) ? 5 : -1);
@@ -902,18 +909,20 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
         unsigned short dst_blend = alpha_prop->GetDestBlendFunc();
         unsigned int threshold = alpha_prop->GetTestThreshold();
 
-        if (threshold > 0 && test && !blend) {
-            // Pure cutout (alpha scissor): blend=false means this is real transparency,
-            // not a team-color mask.
+        if (test && threshold > 0) {
+            // Alpha test with meaningful threshold → hard cutout.
+            // Works whether blend is also set or not (blend is a Civ IV default on many models).
             alpha_scissor_threshold_val = threshold / 255.0f;
             mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
             mat->set_alpha_scissor_threshold(alpha_scissor_threshold_val);
-        } else if (blend && !dark_map_tex.is_valid()) {
-            // Standard alpha blend (foliage, glass, semi-transparent fx).
-            // Exclude team-color meshes (dark_map_tex set) — those use ShaderMaterial instead.
+        } else if (blend && !test && !dark_map_tex.is_valid()) {
+            // Pure alpha blend without test → real semi-transparency (glass, water, particles).
+            // Exclude team-color meshes — those use ShaderMaterial.
             mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
         }
-        // blend=true with dark_map_tex → handled by ShaderMaterial at end of function.
+        // blend=1, test=1, threshold=0 → effectively opaque. Alpha test passes all pixels,
+        // and if textures have alpha=1.0, blending produces opaque result. No transparency mode.
+        // blend=1, test=0, dark_map → team-color path (ShaderMaterial), handled in Section 5.
     }
 
     // Log final transparency decision so broken shapes can be identified by name
