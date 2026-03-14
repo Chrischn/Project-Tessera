@@ -19,6 +19,8 @@
 
 extends Node
 
+const START_UNIT := "artillery.nif"
+
 var _unit_paths: Array[String] = []
 var _current_index: int = 0
 var _unit_container: Node3D = null
@@ -28,14 +30,19 @@ var _base_path: String
 # Debug visualization cycling (press I)
 # Modes: 0=lines only, 1=spheres only, 2=labels only, 3=all debug,
 #         4=hide mesh (debug only), 5=show mesh (hide debug), 6=everything visible
-var _debug_mode: int = 6  # start with everything visible
+var _debug_mode: int = 5  # start with mesh only (debug hidden)
 var _debug_mode_names: Array[String] = [
 	"Lines only", "Spheres only", "Labels only", "All debug overlays",
-	"Debug only (mesh hidden)", "Mesh only (debug hidden)", "Everything visible"
+	"Debug only (mesh hidden)", "Mesh only (debug hidden)", "Everything visible",
+	"Grid",
 ]
 var _debug_hud_label: Label = null
 var _unit_name_label: Label = null
 var _unit_counter_label: Label = null
+var _grid_node: MeshInstance3D = null
+
+# Material override diagnostic (press T)
+var _material_override_active := false
 
 
 func setup(base_path: String) -> void:
@@ -46,6 +53,11 @@ func setup(base_path: String) -> void:
 	if _unit_paths.is_empty():
 		push_error("UnitCycler: no unit NIFs found in VFS")
 		return
+	for i in _unit_paths.size():
+		if _unit_paths[i].get_file().to_lower() == START_UNIT.to_lower():
+			_current_index = i
+			break
+	_create_grid_overlay()
 	_load_unit(_current_index)
 
 
@@ -59,6 +71,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_cycle(1)
 		KEY_I:
 			_cycle_debug_mode()
+		KEY_T:
+			_toggle_material_override()
 
 
 func _cycle(direction: int) -> void:
@@ -67,7 +81,7 @@ func _cycle(direction: int) -> void:
 	_current_index = (_current_index + direction + _unit_paths.size()) % _unit_paths.size()
 	if _unit_container:
 		_spawn_position = _unit_container.position
-		_unit_container.queue_free()
+		_unit_container.free()
 		_unit_container = null
 	_load_unit(_current_index)
 
@@ -92,6 +106,8 @@ func _load_unit(index: int) -> void:
 	niflib.load_nif_scene(disk_path, container, _base_path)
 	print("UnitCycler [%d/%d]: %s" % [index + 1, _unit_paths.size(), nif_path])
 	_apply_debug_mode()
+	if _material_override_active:
+		_apply_override_recursive(_unit_container, _make_diagnostic_mat())
 	_update_unit_hud()
 
 
@@ -143,7 +159,7 @@ func _apply_debug_mode() -> void:
 				if spheres_node: spheres_node.visible = true
 				if labels_node: labels_node.visible = true
 				dbg.visible = true
-			5:  # Mesh only (debug hidden)
+			5, 7:  # Mesh only (debug hidden) / Grid
 				dbg.visible = false
 			6:  # Everything visible
 				if lines_node: lines_node.visible = true
@@ -158,6 +174,10 @@ func _apply_debug_mode() -> void:
 				mi.visible = false
 			_:
 				mi.visible = true
+
+	# Show grid only in mode 7
+	if _grid_node:
+		_grid_node.visible = (_debug_mode == 7)
 
 
 func _find_nodes_by_name(root: Node, target_name: String) -> Array[Node]:
@@ -188,6 +208,65 @@ func _is_inside_bone_debug(node: Node) -> bool:
 			return true
 		current = current.get_parent()
 	return false
+
+
+# --- Material override diagnostic (press T) ---
+# Replaces every mesh material with a flat red opaque StandardMaterial3D
+# (cull_disabled, unshaded) to isolate material from geometry.
+# If the model still shows see-through holes under the override → geometry cause.
+# If the model becomes fully solid → shader/material cause.
+
+func _toggle_material_override() -> void:
+	_material_override_active = !_material_override_active
+	var override_mat: StandardMaterial3D = null
+	if _material_override_active:
+		override_mat = _make_diagnostic_mat()
+	if _unit_container:
+		_apply_override_recursive(_unit_container, override_mat)
+	print("[DIAG] Material override: ", "ON (flat red, cull_disabled)" if _material_override_active else "OFF (restored)")
+
+
+func _make_diagnostic_mat() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.0, 0.0, 1.0)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+	return mat
+
+
+func _apply_override_recursive(node: Node, mat: Material) -> void:
+	if node is MeshInstance3D:
+		node.material_override = mat
+	for child in node.get_children():
+		_apply_override_recursive(child, mat)
+
+
+# --- Grid overlay ---
+
+const GRID_HALF_EXTENT := 1000  # metres; 2km x 2km total, 1m cells
+
+func _create_grid_overlay() -> void:
+	var verts := PackedVector3Array()
+	var e := float(GRID_HALF_EXTENT)
+	for i in range(-GRID_HALF_EXTENT, GRID_HALF_EXTENT + 1):
+		var f := float(i)
+		verts.append(Vector3(-e, 0.0,  f)); verts.append(Vector3( e, 0.0,  f))  # X-parallel lines
+		verts.append(Vector3( f, 0.0, -e)); verts.append(Vector3( f, 0.0,  e))  # Z-parallel lines
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	var arr_mesh := ArrayMesh.new()
+	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.5, 0.5, 0.5)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	arr_mesh.surface_set_material(0, mat)
+	_grid_node = MeshInstance3D.new()
+	_grid_node.name = "GridOverlay"
+	_grid_node.mesh = arr_mesh
+	_grid_node.visible = false
+	get_parent().add_child(_grid_node)
 
 
 # --- Debug HUD ---
