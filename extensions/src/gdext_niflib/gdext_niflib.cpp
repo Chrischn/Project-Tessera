@@ -54,6 +54,7 @@
 #include <obj/NiMaterialProperty.h>
 #include <obj/NiAlphaProperty.h>
 #include <obj/NiVertexColorProperty.h>
+#include <obj/NiSpecularProperty.h>
 
 //godot-cpp Headers
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -714,6 +715,8 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
     NiMaterialPropertyRef mat_prop;
     NiAlphaPropertyRef alpha_prop;
     NiTexturingPropertyRef tex_prop;
+    NiSpecularPropertyRef spec_prop;
+    NiVertexColorPropertyRef vc_prop;
     // Captured for ShaderMaterial passthrough (populated in the blocks below)
     float alpha_scissor_threshold_val = 0.0f;
     godot::Ref<godot::ImageTexture> dark_map_tex;   // populated from TeamColor.bmp (BASE_MAP slot 0) when detected
@@ -722,9 +725,11 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
 
     for (const auto& prop : properties) {
         if (prop == NULL) continue;
-        if (auto m = DynamicCast<NiMaterialProperty>(prop)) mat_prop = m;
-        if (auto a = DynamicCast<NiAlphaProperty>(prop))    alpha_prop = a;
-        if (auto t = DynamicCast<NiTexturingProperty>(prop)) tex_prop = t;
+        if (auto m = DynamicCast<NiMaterialProperty>(prop))     mat_prop = m;
+        if (auto a = DynamicCast<NiAlphaProperty>(prop))        alpha_prop = a;
+        if (auto t = DynamicCast<NiTexturingProperty>(prop))    tex_prop = t;
+        if (auto s = DynamicCast<NiSpecularProperty>(prop))     spec_prop = s;
+        if (auto v = DynamicCast<NiVertexColorProperty>(prop))  vc_prop = v;
     }
 
     // ---- Section 1: NiMaterialProperty colors ----
@@ -755,9 +760,23 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
         mat->set_specular(spec_intensity);
     }
 
+    // ---- Section 1b: NiSpecularProperty ----
+    // If the property exists and its enable flag (bit 0) is off, kill specular entirely.
+    if (spec_prop && (spec_prop->GetFlags() & 1) == 0) {
+        mat->set_specular(0.0f);
+        mat->set_metallic(0.0f);
+    }
+
     // ---- Section 2: Vertex colors ----
+    // NiVertexColorProperty.vertexMode: 0=ignore, 1=emissive (approx as amb+dif), 2=amb+dif
     if (has_vertex_colors) {
-        mat->set_flag(StandardMaterial3D::FLAG_SRGB_VERTEX_COLOR, true);
+        VertMode vmode = vc_prop ? vc_prop->GetVertexMode() : VERT_MODE_SRC_AMB_DIF;
+        if (vmode != VERT_MODE_SRC_IGNORE) {
+            mat->set_flag(StandardMaterial3D::FLAG_SRGB_VERTEX_COLOR, true);
+            if (vmode == VERT_MODE_SRC_EMISSIVE)
+                UtilityFunctions::print("[MAT] NiVertexColorProperty: EMISSIVE mode "
+                                        "approximated as ambient+diffuse");
+        }
     }
 
     // ---- Section 3: NiTexturingProperty textures ----
@@ -811,20 +830,44 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
                 mat->set_albedo(godot::Color(1.0f, 1.0f, 1.0f, current.a));
                 UtilityFunctions::print("[TEX] Albedo from slot ", slot, ": ",
                     String::utf8(albedo_desc.source->GetTextureFileName().c_str()));
+                // UV set: warn if non-zero (multi-UV geometry not yet supported)
+                if (albedo_desc.uvSet != 0)
+                    UtilityFunctions::print("[TEX] Slot ", slot, " requests UV set ",
+                        albedo_desc.uvSet, " — multi-UV not yet supported, using UV set 0");
+                // UV transform: apply offset and scale from TexDesc
+                if (albedo_desc.hasTextureTransform) {
+                    mat->set_uv1_offset(godot::Vector3(
+                        albedo_desc.translation.u, albedo_desc.translation.v, 0.0f));
+                    mat->set_uv1_scale(godot::Vector3(
+                        albedo_desc.tiling.u, albedo_desc.tiling.v, 1.0f));
+                    if (albedo_desc.wRotation != 0.0f)
+                        UtilityFunctions::print("[TEX] UV rotation wRotation=",
+                            albedo_desc.wRotation, " not yet supported in StandardMaterial3D");
+                }
                 albedo_loaded = true;
             }
         }
-        // GLOSS_MAP (slot 3) -> roughness texture
+        // GLOSS_MAP (slot 3) -> roughness texture (inverted)
         // Civ IV GLOSS_MAP is glossiness (bright = glossy = low roughness).
         // Godot's roughness texture is the inverse (bright = rough).
-        // TODO: invert gloss->roughness for accurate PBR reproduction.
+        // Invert by duplicating the image and negating each pixel's RGB.
         if (tex_prop->HasTexture(3)) {
             TexDesc gloss_desc = tex_prop->GetTexture(3);
             if (gloss_desc.source != NULL && gloss_desc.source->IsTextureExternal()) {
-                auto tex = load_dds_texture(base_path, gloss_desc.source->GetTextureFileName());
-                if (tex.is_valid()) {
-                    mat->set_texture(StandardMaterial3D::TEXTURE_ROUGHNESS, tex);
-                    UtilityFunctions::print("[TEX] Roughness (GLOSS_MAP) from slot 3: ",
+                auto gloss_tex = load_dds_texture(base_path, gloss_desc.source->GetTextureFileName());
+                if (gloss_tex.is_valid()) {
+                    godot::Ref<godot::Image> rough_img = gloss_tex->get_image()->duplicate();
+                    if (rough_img->is_compressed()) rough_img->decompress();
+                    for (int iy = 0; iy < rough_img->get_height(); iy++)
+                        for (int ix = 0; ix < rough_img->get_width(); ix++) {
+                            godot::Color c = rough_img->get_pixel(ix, iy);
+                            rough_img->set_pixel(ix, iy,
+                                godot::Color(1.0f - c.r, 1.0f - c.g, 1.0f - c.b, c.a));
+                        }
+                    mat->set_texture(StandardMaterial3D::TEXTURE_ROUGHNESS,
+                                     godot::ImageTexture::create_from_image(rough_img));
+                    mat->set_roughness(1.0f); // texture is the sole roughness driver; scalar from NiMaterialProperty no longer needed
+                    UtilityFunctions::print("[TEX] Roughness (GLOSS_MAP inverted) from slot 3: ",
                         String::utf8(gloss_desc.source->GetTextureFileName().c_str()));
                 }
             }
@@ -858,18 +901,19 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
         unsigned short src_blend = alpha_prop->GetSourceBlendFunc();
         unsigned short dst_blend = alpha_prop->GetDestBlendFunc();
         unsigned int threshold = alpha_prop->GetTestThreshold();
-        // Capture threshold for ShaderMaterial if this shape later uses one.
-        // Only when blend=false: blend=true means team-color mask, not cutout.
-        if (threshold > 0 && test && !blend) { alpha_scissor_threshold_val = threshold / 255.0f; }
 
-        // Only apply ALPHA_SCISSOR for pure cutout shapes (blend=false, test=true).
-        // blend=true means Civ IV is using alpha for team-color blending — the DXT3 alpha
-        // channel stores a mask (0 = colorable area, 1 = base texture), not transparency.
-        // Applying ALPHA_SCISSOR there discards the colorable-area pixels and creates holes.
         if (threshold > 0 && test && !blend) {
+            // Pure cutout (alpha scissor): blend=false means this is real transparency,
+            // not a team-color mask.
+            alpha_scissor_threshold_val = threshold / 255.0f;
             mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
-            mat->set_alpha_scissor_threshold(threshold / 255.0f);
+            mat->set_alpha_scissor_threshold(alpha_scissor_threshold_val);
+        } else if (blend && !dark_map_tex.is_valid()) {
+            // Standard alpha blend (foliage, glass, semi-transparent fx).
+            // Exclude team-color meshes (dark_map_tex set) — those use ShaderMaterial instead.
+            mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
         }
+        // blend=true with dark_map_tex → handled by ShaderMaterial at end of function.
     }
 
     // Log final transparency decision so broken shapes can be identified by name
