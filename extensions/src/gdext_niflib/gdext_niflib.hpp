@@ -33,6 +33,7 @@
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
+#include <godot_cpp/classes/bone_attachment3d.hpp>
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/animation.hpp>
@@ -106,6 +107,14 @@ public:
     // Converts a NIF Matrix44 (world transform) to a Godot Transform3D with coord conversion.
     godot::Transform3D nif_matrix44_to_godot(const Niflib::Matrix44& mat);
 
+    // --- Bone attachment reparenting ---
+    // After process_ni_node builds the Node3D tree, attachment nodes (weapons, props)
+    // are children of static bone-mirror Node3Ds. This pass reparents them under
+    // BoneAttachment3D on the Skeleton3D so they follow animated bones.
+    void reparent_bone_attachments(Niflib::NiNodeRef ni_node, Node3D* root_godot_node);
+    void reparent_bone_attachments_recursive(Niflib::NiNodeRef ni_node,
+        Skeleton3D* skeleton, Node3D* root_godot_node);
+
     // --- Debug visualization ---
     // Adds colored sphere/line/label overlays for each skeleton bone (toggled by 'I' key).
     void debug_visualize_skeleton(Skeleton3D* skeleton);
@@ -127,11 +136,6 @@ public:
     // Maps NIF skeleton root NiNode* -> explicit Skin resource (inverse-rest bind poses).
     // Created once per skeleton via create_skin_from_rest_transforms(), shared across shapes.
     std::map<Niflib::NiNode*, godot::Ref<godot::Skin>> skin_cache;
-    // Per-bone correction transform: maps NIF-parent-local animation space → Godot bone-parent-local space.
-    // Needed because the Godot skeleton may skip intermediate NIF nodes when establishing
-    // parent-child relationships, so animation data (relative to NIF parent) differs from
-    // what Godot expects (relative to Godot parent bone).
-    std::map<std::string, godot::Transform3D> bone_anim_correction;
 
     // --- Team color ---
     // Applied at runtime to all meshes that carry a DARK_MAP (slot 1) mask texture.

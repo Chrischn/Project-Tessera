@@ -19,7 +19,7 @@
 
 extends Node
 
-const START_UNIT := "artillery.nif"
+const START_UNIT := "axeman.nif"
 
 var _unit_paths: Array[String] = []
 var _current_index: int = 0
@@ -90,9 +90,75 @@ func _cycle_animation() -> void:
 		return
 	_anim_clip_index = (_anim_clip_index + 1) % _anim_clip_names.size()
 	var clip: String = _anim_clip_names[_anim_clip_index]
+	if clip == "(none)":
+		_anim_player.stop()
+		# Reset bone poses to rest so we see the pure rest pose
+		var skel := _find_skeleton(_unit_container)
+		if skel:
+			skel.reset_bone_poses()
+		_update_anim_hud()
+		print("UnitCycler [ANIM]: stopped — showing REST POSE")
+		return
 	_anim_player.play(clip)
 	_update_anim_hud()
 	print("UnitCycler [ANIM]: playing '%s'" % clip)
+	_print_clip_diagnostics(clip)
+
+
+func _print_clip_diagnostics(clip_name: String) -> void:
+	var skel := _find_skeleton(_unit_container)
+	if not skel or not _anim_player:
+		return
+	var lib := _anim_player.get_animation_library("")
+	if not lib:
+		return
+	var anim := lib.get_animation(clip_name)
+	if not anim:
+		return
+
+	print("--- [DIAG] Clip: '%s'  tracks=%d  length=%.3f ---" \
+		% [clip_name, anim.get_track_count(), anim.length])
+
+	for t_idx in anim.get_track_count():
+		var path := anim.track_get_path(t_idx)
+		var type := anim.track_get_type(t_idx)
+		# Extract bone name from path (last component after ':')
+		var path_str := str(path)
+		var bone_name := path_str.get_slice(":", path_str.get_slice_count(":") - 1)
+		var bone_idx := skel.find_bone(bone_name)
+		var key_count := anim.track_get_key_count(t_idx)
+
+		if type == Animation.TYPE_ROTATION_3D and key_count > 0:
+			var first_rot: Quaternion = anim.track_get_key_value(t_idx, 0)
+			var rest_rot := skel.get_bone_rest(bone_idx).basis.get_rotation_quaternion() \
+				if bone_idx >= 0 else Quaternion.IDENTITY
+			var angle_diff := rad_to_deg(first_rot.angle_to(rest_rot))
+			print("  ROT  %-25s  first=(%.3f, %.3f, %.3f, %.3f)  rest=(%.3f, %.3f, %.3f, %.3f)  diff=%.1fdeg" \
+				% [bone_name,
+				   first_rot.x, first_rot.y, first_rot.z, first_rot.w,
+				   rest_rot.x, rest_rot.y, rest_rot.z, rest_rot.w,
+				   angle_diff])
+		elif type == Animation.TYPE_POSITION_3D and key_count > 0:
+			var first_pos: Vector3 = anim.track_get_key_value(t_idx, 0)
+			var rest_pos := skel.get_bone_rest(bone_idx).origin \
+				if bone_idx >= 0 else Vector3.ZERO
+			var dist := first_pos.distance_to(rest_pos)
+			print("  POS  %-25s  first=(%.3f, %.3f, %.3f)  rest=(%.3f, %.3f, %.3f)  dist=%.3f" \
+				% [bone_name,
+				   first_pos.x, first_pos.y, first_pos.z,
+				   rest_pos.x, rest_pos.y, rest_pos.z,
+				   dist])
+	print("--- [DIAG] end ---")
+
+
+func _find_skeleton(node: Node) -> Skeleton3D:
+	if node is Skeleton3D:
+		return node
+	for child in node.get_children():
+		var found := _find_skeleton(child)
+		if found:
+			return found
+	return null
 
 
 func _cycle(direction: int) -> void:
@@ -143,10 +209,13 @@ func _load_unit(index: int) -> void:
 		if lib:
 			_anim_clip_names = Array(lib.get_animation_list())
 			_anim_clip_names.sort()
-		if not _anim_clip_names.is_empty():
-			_anim_player.play(_anim_clip_names[0])
-			print("UnitCycler [ANIM]: auto-playing '%s' (%d clips)" \
-				% [_anim_clip_names[0], _anim_clip_names.size()])
+		# Insert "(none)" at index 0 — shows pure rest pose (no animation)
+		_anim_clip_names.insert(0, &"(none)")
+		if _anim_clip_names.size() > 1:
+			# Auto-start with "(none)" = rest pose for diagnostic comparison
+			_anim_clip_index = 0
+			print("UnitCycler [ANIM]: showing REST POSE (%d clips + none)" \
+				% [_anim_clip_names.size() - 1])
 		else:
 			print("UnitCycler [ANIM]: AnimationPlayer present but no clips")
 	else:

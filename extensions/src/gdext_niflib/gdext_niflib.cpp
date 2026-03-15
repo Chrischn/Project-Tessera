@@ -3,7 +3,7 @@
 // NIF -> Godot scene translation for Civilization IV NIF files (version 20.0.0.4).
 //
 // Responsibilities:
-//   - Coordinate system conversion (NIF left-handed Z-up -> Godot right-handed Y-up)
+//   - Coordinate system conversion (NIF right-handed Z-up -> Godot right-handed Y-up)
 //   - Scene graph traversal: NiNode hierarchy -> Godot Node3D hierarchy
 //   - Geometry processing: NiTriShape / NiTriStrips -> ArrayMesh (via SurfaceTool)
 //   - Material and texture loading: NiProperty set -> StandardMaterial3D or ShaderMaterial
@@ -13,10 +13,12 @@
 //   NiTexturingProperty, NiMaterialProperty, NiAlphaProperty, NiVertexColorProperty.
 //
 // --- Coordinate system ---
-//   NIF:   left-handed,  X-right, Y-forward, Z-up
+//   NIF:   right-handed, X-right, Y-forward, Z-up
 //   Godot: right-handed, X-right, Y-up,      Z-backward
 //   Mapping: Godot(x, y, z) = NIF(x, z, -y)
 //   Rotations: R_godot = P * R_nif * P^T  (see nif_matrix33_to_godot)
+//   NOTE: niflib stores row-vector matrices (v*M), so the stored Matrix33 is R^T.
+//         nif_matrix33_to_godot transposes before applying P*R*P^T.
 //
 // --- Winding order ---
 //   The handedness change reverses which triangle winding is "front-facing".
@@ -61,6 +63,8 @@
 #include <obj/NiTransformInterpolator.h>
 #include <obj/NiKeyframeController.h>
 #include <obj/NiTransformData.h>
+#include <obj/NiKeyframeData.h>
+#include <obj/NiBSplineCompTransformInterpolator.h>
 #include <obj/NiStringPalette.h>
 #include <gen/ControllerLink.h>
 
@@ -79,6 +83,7 @@
 #include <godot_cpp/classes/animation_library.hpp>
 //Standard Library
 #include <vector>
+#include <set>
 #include <algorithm>
 #include <exception>
 #include <fstream>
@@ -90,7 +95,7 @@ using namespace Niflib;
 // =============================================================================
 // Coordinate conversion helpers
 // =============================================================================
-// NIF (Civ IV v20.0.0.4): left-handed, Z-up, Y-forward
+// NIF (Civ IV v20.0.0.4): right-handed, Z-up, Y-forward
 // Godot:                  right-handed, Y-up, Z-backward
 //
 // Per-component mapping:
@@ -107,7 +112,7 @@ using namespace Niflib;
 //   how rotations interact with the axis remapping.
 //
 // Winding order:
-//   The handedness change (left → right) reverses which triangle winding is
+//   The axis remapping (Z-up → Y-up) reverses which triangle winding is
 //   considered "front-facing".  NIF uses CW front-face; Godot uses CCW.
 //   Fix: swap v2↔v3 in every triangle's index list.
 //   Without this swap, all meshes render inside-out (backfaces visible,
@@ -123,19 +128,22 @@ static godot::Vector3 nif_to_godot_vec3(const Niflib::Vector3& v) {
     return godot::Vector3(v.x, v.z, -v.y);
 }
 
-// Converts a NIF quaternion (left-handed Z-up) to a Godot quaternion (right-handed Y-up).
-// Applies the same axis permutation as nif_to_godot_vec3: NIF(x,y,z) → Godot(x,z,-y).
+// Converts a NIF quaternion to a Godot quaternion.
+// Axis permutation NIF(x,y,z) → Godot(x,z,-y).
 static godot::Quaternion nif_quat_to_godot(const Niflib::Quaternion& q) {
-    return godot::Quaternion(q.x, q.z, -q.y, q.w);
+    return godot::Quaternion(q.x, q.z, -q.y, q.w).normalized();
 }
 
 // Converts a NIF Matrix33 rotation to a Godot Basis via R_godot = P * R_nif * P^T.
+// niflib stores matrices in row-vector convention (v * M), so the stored matrix is
+// the TRANSPOSE of the column-vector rotation.  We read r[j][i] (transposing) to get
+// the column-vector rotation before applying the coordinate permutation P.
 // Used by nif_matrix44_to_godot(), apply_nif_transform(), and skinned geometry paths.
 static godot::Basis nif_matrix33_to_godot(const Niflib::Matrix33& r) {
     godot::Basis b;
-    b.set_column(0, godot::Vector3( r[0][0],  r[2][0], -r[1][0]));  // X column
-    b.set_column(1, godot::Vector3( r[0][2],  r[2][2], -r[1][2]));  // Y column (was Z)
-    b.set_column(2, godot::Vector3(-r[0][1], -r[2][1],  r[1][1]));  // Z column (was -Y)
+    b.set_column(0, godot::Vector3( r[0][0],  r[0][2], -r[0][1]));  // X column
+    b.set_column(1, godot::Vector3( r[2][0],  r[2][2], -r[2][1]));  // Y column (was Z)
+    b.set_column(2, godot::Vector3(-r[1][0], -r[1][2],  r[1][1]));  // Z column (was -Y)
     return b;
 }
 
@@ -160,6 +168,36 @@ godot::Transform3D GdextNiflib::nif_matrix44_to_godot(const Niflib::Matrix44& ma
     apply_uniform_scale(basis, scale);
 
     return godot::Transform3D(basis, origin);
+}
+
+// Linearly interpolates a NIF float-key array at the given time.
+// Before the first key: returns first value. After the last key: returns last value.
+// Used for XYZ Euler rotation keys where each axis has its own key array.
+static float sample_float_keys(const std::vector<Niflib::Key<float>>& keys, float t) {
+    if (keys.empty()) return 0.0f;
+    if (keys.size() == 1 || t <= keys.front().time) return keys.front().data;
+    if (t >= keys.back().time) return keys.back().data;
+
+    // Binary search for the bracketing keys
+    for (size_t i = 1; i < keys.size(); ++i) {
+        if (t <= keys[i].time) {
+            float t0 = keys[i - 1].time;
+            float t1 = keys[i].time;
+            float alpha = (t1 > t0) ? (t - t0) / (t1 - t0) : 0.0f;
+            return keys[i - 1].data + alpha * (keys[i].data - keys[i - 1].data);
+        }
+    }
+    return keys.back().data;
+}
+
+// Converts NIF XYZ Euler angles (radians, intrinsic XYZ order) to a Godot quaternion.
+// Verified rotation order from OpenMW (components/nifosg/controller.cpp): Qx * Qy * Qz.
+// Axis mapping NIF→Godot: NIF-X→Godot-X, NIF-Y→Godot(-Z), NIF-Z→Godot-Y.
+static godot::Quaternion nif_euler_xyz_to_godot(float rx, float ry, float rz) {
+    godot::Quaternion qx(godot::Vector3(1, 0, 0), rx);
+    godot::Quaternion qy(godot::Vector3(0, 0, -1), ry);
+    godot::Quaternion qz(godot::Vector3(0, 1, 0), rz);
+    return qx * qy * qz;
 }
 
 // Normalizes per-vertex bone weights for Godot GPU skinning (max 4 influences).
@@ -217,13 +255,52 @@ Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent
     if (!skin_data) return nullptr;
 
     std::vector<NiNodeRef> bones = skin->GetBones();
+    unsigned int skin_bone_count = (unsigned int)bones.size();
+    if (skin_bone_count == 0) return nullptr;
+
+    // Collect skin bones into a set for quick lookup.
+    std::set<NiNodeRef> bone_set(bones.begin(), bones.end());
+    bone_set.erase(NiNodeRef());  // remove null if present
+
+    // Find intermediate NIF nodes that must be skeleton bones.
+    // Two cases: (a) nodes between two skin bones (e.g. BIP Neck between
+    // BIP Spine1 and clavicles), and (b) nodes between the skeleton's Godot
+    // parent (parent_ni_node) and root skin bones (e.g. BIP between
+    // MD NonAccum and BIP Pelvis).  Case (b) is critical: these nodes are
+    // animated, and without them the skeleton can't chain transforms correctly.
+    // Nodes above parent_ni_node (MD, MD NonAccum, Scene Root) stay as
+    // scene graph Node3Ds — the skeleton sits under parent_ni_node.
+    NiNodeRef skel_root = skin->GetSkeletonRoot();
+    for (unsigned int i = 0; i < skin_bone_count; ++i) {
+        if (bones[i] == NULL) continue;
+        std::vector<NiNodeRef> candidates;
+        NiNodeRef walk = bones[i]->GetParent();
+        bool should_add = false;
+        while (walk != NULL && walk != skel_root) {
+            if (bone_set.count(walk)) {
+                should_add = true;  // Found existing bone ancestor
+                break;
+            }
+            if (walk == parent_ni_node) {
+                should_add = true;  // Reached skeleton's Godot parent
+                break;
+            }
+            candidates.push_back(walk);
+            walk = walk->GetParent();
+        }
+        if (should_add) {
+            for (auto& node : candidates) {
+                bone_set.insert(node);
+                bones.push_back(node);
+            }
+        }
+    }
     unsigned int bone_count = (unsigned int)bones.size();
-    if (bone_count == 0) return nullptr;
 
     Skeleton3D* skeleton = memnew(Skeleton3D);
     skeleton->set_name("Skeleton3D");
 
-    // Step 1: Add all bones and build index map
+    // Step 1: Add all bones (skin + intermediate) and build index map
     bone_index_map.clear();
     for (unsigned int i = 0; i < bone_count; ++i) {
         NiNodeRef bone = bones[i];
@@ -254,51 +331,15 @@ Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent
         // If no parent found in bone list, bone stays as root (-1 parent, the default)
     }
 
-    // Step 3: Compute rest poses from bone world transforms.
-    // Express bone transforms relative to the parent NiNode so that the
-    // Skeleton3D (which sits under the parent's Godot node) doesn't
-    // double-apply the hierarchy transforms.
-    godot::Transform3D parent_world_godot;
-    if (parent_ni_node != NULL) {
-        parent_world_godot = nif_matrix44_to_godot(parent_ni_node->GetWorldTransform());
-    }
-
-    std::vector<godot::Transform3D> bone_globals(bone_count);
+    // Step 3: Set rest poses from NiNode LOCAL transforms.
+    // This matches godotwind's approach: bone rest = NiNode's local transform
+    // (relative to its NIF parent). Animation keyframes are also in NIF-parent-local
+    // space, so they directly replace the rest pose with no correction needed.
     for (unsigned int i = 0; i < bone_count; ++i) {
         NiNodeRef bone = bones[i];
         if (bone == NULL) continue;
 
-        godot::Transform3D bone_world = nif_matrix44_to_godot(bone->GetWorldTransform());
-        // Convert from world space to skeleton-local space
-        if (parent_ni_node != NULL) {
-            bone_globals[i] = parent_world_godot.affine_inverse() * bone_world;
-        } else {
-            bone_globals[i] = bone_world;
-        }
-    }
-
-    // Set rest transforms (local to parent bone)
-    for (unsigned int i = 0; i < bone_count; ++i) {
-        NiNodeRef bone = bones[i];
-        if (bone == NULL) continue;
-
-        int parent_idx = skeleton->get_bone_parent(bone_index_map[bone]);
-        godot::Transform3D rest;
-        if (parent_idx >= 0) {
-            // Find which NIF bone has this parent index
-            godot::Transform3D parent_global;
-            for (unsigned int j = 0; j < bone_count; ++j) {
-                if (bones[j] != NULL && bone_index_map[bones[j]] == parent_idx) {
-                    parent_global = bone_globals[j];
-                    break;
-                }
-            }
-            rest = parent_global.affine_inverse() * bone_globals[i];
-        } else {
-            // Root bone: rest relative to skeleton origin
-            rest = bone_globals[i];
-        }
-
+        godot::Transform3D rest = nif_matrix44_to_godot(bone->GetLocalTransform());
         skeleton->set_bone_rest(bone_index_map[bone], rest);
     }
 
@@ -307,44 +348,9 @@ Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent
     // Without this, skinning computes: T = identity * inverse_rest = inverse_rest != identity.
     skeleton->reset_bone_poses();
 
-    // Compute per-bone animation correction transforms.
-    // NIF .kf animation data is in bone-NIF-parent-local space, but Godot expects
-    // bone-Godot-parent-local space.  When the Godot skeleton skips intermediate
-    // NIF nodes (e.g. "MD NonAccum") in the parent chain, the two spaces differ.
-    // Correction: C = godot_parent_global^-1 * nif_parent_global  (in skeleton-local space).
-    for (unsigned int i = 0; i < bone_count; ++i) {
-        NiNodeRef bone = bones[i];
-        if (bone == NULL) continue;
-
-        std::string bname = bone->GetName();
-        int godot_idx = bone_index_map[bone];
-        int parent_bone_idx = skeleton->get_bone_parent(godot_idx);
-
-        // Bone's direct NIF parent in skeleton-local space
-        NiNodeRef nif_parent = bone->GetParent();
-        godot::Transform3D nif_parent_skel;
-        if (nif_parent != NULL && parent_ni_node != NULL) {
-            nif_parent_skel = parent_world_godot.affine_inverse() *
-                nif_matrix44_to_godot(nif_parent->GetWorldTransform());
-        }
-
-        // Godot parent bone's global in skeleton-local space
-        godot::Transform3D godot_parent_skel;
-        if (parent_bone_idx >= 0) {
-            for (unsigned int j = 0; j < bone_count; ++j) {
-                if (bones[j] != NULL && bone_index_map[bones[j]] == parent_bone_idx) {
-                    godot_parent_skel = bone_globals[j];
-                    break;
-                }
-            }
-        }
-        // Root bones: godot_parent_skel stays identity (skeleton origin).
-
-        bone_anim_correction[bname] = godot_parent_skel.affine_inverse() * nif_parent_skel;
-    }
-
-    NiNodeRef skel_root = skin->GetSkeletonRoot();
-    UtilityFunctions::print("[SKIN] Built skeleton: ", bone_count, " bones, root=",
+    unsigned int intermediate_count = bone_count - skin_bone_count;
+    UtilityFunctions::print("[SKIN] Built skeleton: ", bone_count, " bones (",
+        skin_bone_count, " skin + ", intermediate_count, " intermediate), root=",
         skel_root ? String::utf8(skel_root->GetName().c_str()) : String("<null>"));
 
     // Create explicit Skin with inverse-rest bind poses so skinning gives identity at rest.
@@ -352,6 +358,29 @@ Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent
     // vertices (bone_global_rest * identity != identity), causing distortion.
     Ref<Skin> skin_res = skeleton->create_skin_from_rest_transforms();
     skin_cache[skel_root] = skin_res;
+
+    // --- Diagnostic: compare our computed bind vs NIF skin data bind ---
+    // Our bind = inverse(bone_global_rest). NIF stores per-bone transforms in skin_data.
+    // Print both origins for manual comparison (NIF values need coord swap to compare).
+    for (unsigned int i = 0; i < skin_bone_count; ++i) {
+        NiNodeRef bone = bones[i];
+        if (!bone) continue;
+        auto it = bone_index_map.find(bone);
+        if (it == bone_index_map.end()) continue;
+        int gidx = it->second;
+
+        godot::Transform3D our_bind = skeleton->get_bone_global_rest(gidx).affine_inverse();
+        Niflib::Matrix44 nif_bt = skin_data->GetBoneTransform(i);
+        Niflib::Vector3 nif_t;
+        Niflib::Matrix33 nif_r;
+        float nif_s;
+        nif_bt.Decompose(nif_t, nif_r, nif_s);
+
+        UtilityFunctions::print("[BIND] bone=", skeleton->get_bone_name(gidx),
+            " ours=(", our_bind.origin.x, ",", our_bind.origin.y, ",", our_bind.origin.z, ")",
+            " nif=(", nif_t.x, ",", nif_t.y, ",", nif_t.z, ")",
+            " nif_godot=(", nif_t.x, ",", nif_t.z, ",", -nif_t.y, ")");
+    }
 
     return skeleton;
 }
@@ -696,8 +725,6 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
                                    godot::Node3D* root_godot_node) {
     (void)base_path; // reserved for future VFS texture lookup in .kf files
     if (!root_godot_node) return;
-    UtilityFunctions::print("[ANIM] >>> build_animations entered, nif=", nif_path.get_file());
-
     // --- Derive .kfm path from .nif path ---
     std::string nif_path_std = nif_path.utf8().get_data();
     std::string kfm_path_std = nif_path_std;
@@ -711,13 +738,11 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
 
     // Load .kfm — use the istream overload directly to avoid Kfm::Read(string)'s
     // strict EOF validation, which throws on files with trailing padding bytes.
-    UtilityFunctions::print("[ANIM] Reading .kfm: ", String::utf8(kfm_path_std.c_str()));
     Niflib::Kfm kfm;
     {
         std::ifstream kfm_in(kfm_path_std, std::ios::binary);
         if (!kfm_in.good()) {
-            UtilityFunctions::print("[ANIM] No .kfm found alongside: ", nif_path.get_file());
-            return;
+            return; // No .kfm found
         }
         try {
             unsigned int kfm_ver = kfm.Read(kfm_in);
@@ -736,9 +761,6 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
             return;
         }
     }
-    UtilityFunctions::print("[ANIM] Loaded .kfm: ", nif_path.get_file(),
-        ", ", (int)kfm.actions.size(), " actions");
-
     if (kfm.actions.empty()) return;
 
     // NIF directory — .kf filenames in the KFM are relative to this
@@ -755,11 +777,11 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
     godot::Ref<AnimationLibrary> lib;
     lib.instantiate();
 
-    // Helper lambda: walk skel's parent chain to build a NodePath string relative
-    // to root_godot_node.  Returns "" if skel is not a descendant of root_godot_node.
-    auto skel_rel_path = [&](Skeleton3D* skel) -> String {
+    // Helper lambda: walk any Node3D's parent chain to build a NodePath string
+    // relative to root_godot_node.  Returns "" if node is not a descendant of root_godot_node.
+    auto node_rel_path = [&](Node3D* node) -> String {
         std::vector<std::string> parts;
-        Node* cur = skel;
+        Node* cur = node;
         while (cur != nullptr && cur != root_godot_node) {
             parts.push_back(std::string(String(cur->get_name()).utf8().get_data()));
             cur = cur->get_parent();
@@ -781,13 +803,10 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
         {
             std::ifstream kf_test(kf_path_std);
             if (!kf_test.good()) {
-                UtilityFunctions::print("[ANIM] Missing .kf: ",
-                    String::utf8(action.action_filename.c_str()));
-                continue;
+                continue; // Missing .kf file
             }
         }
 
-        UtilityFunctions::print("[ANIM] Loading .kf: ", String::utf8(kf_path_std.c_str()));
         Niflib::NiObjectRef kf_root;
         try {
             kf_root = ReadNifTree(kf_path_std);
@@ -800,11 +819,7 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
 
         Niflib::NiControllerSequenceRef seq =
             DynamicCast<Niflib::NiControllerSequence>(kf_root);
-        if (!seq) {
-            UtilityFunctions::print("[ANIM] .kf root is not NiControllerSequence: ",
-                String::utf8(action.action_filename.c_str()));
-            continue;
-        }
+        if (!seq) continue;
 
         float seq_start = seq->GetStartTime();
         float seq_stop  = seq->GetStopTime();
@@ -812,10 +827,6 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
         if (duration < 0.001f) duration = 0.1f;
 
         std::vector<Niflib::ControllerLink> ctrl_data = seq->GetControllerData();
-        UtilityFunctions::print("[ANIM] Clip '",
-            String::utf8(action.action_name.c_str()), "': ",
-            seq_start, "-", seq_stop, "s, ",
-            (int)ctrl_data.size(), " controllers");
 
         godot::Ref<Animation> anim;
         anim.instantiate();
@@ -824,41 +835,23 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
             ? Animation::LOOP_LINEAR
             : Animation::LOOP_NONE);
 
-        bool xyz_warned = false;
         int tracks_created = 0;
+        int euler_rot_count = 0, quat_rot_count = 0, bspline_rot_count = 0;
 
         for (const Niflib::ControllerLink& link : ctrl_data) {
-            // --- Resolve bone name ---
-            std::string bone_name = std::string(link.nodeName);
-            if (bone_name.empty() && link.stringPalette != NULL) {
-                bone_name = link.stringPalette->GetSubStr(
+            // --- Resolve target name ---
+            std::string target_name = std::string(link.nodeName);
+            if (target_name.empty() && link.stringPalette != NULL) {
+                target_name = link.stringPalette->GetSubStr(
                     (short)link.nodeNameOffset);
             }
-            if (bone_name.empty()) continue;
+            if (target_name.empty()) continue;
 
-            // --- Find bone in skeleton cache ---
-            Skeleton3D* skel = nullptr;
-            for (auto& skel_entry : skeleton_cache) {
-                int idx = skel_entry.second->find_bone(
-                    String::utf8(bone_name.c_str()));
-                if (idx >= 0) {
-                    skel = skel_entry.second;
-                    break;
-                }
-            }
-            if (!skel) {
-                // Many .kf controllers target scene graph nodes (e.g. "Editable Mesh",
-                // "MD NonAccum") rather than skeleton bones — expected, skip silently.
-                continue;
-            }
-
-            // --- Get keyframe data ---
-            // Civ IV uses NIF 20.0.0.4 (> 10.2.0.0) → interpolator path is primary.
-            // NiKeyframeController fallback covers older / unusual .kf files.
+            // --- Resolve keyframe data + interpolator (shared by bone and node paths) ---
             Niflib::NiKeyframeDataRef kf_data = NULL;
+            Niflib::NiTransformInterpolatorRef ti = NULL;
             if (link.interpolator != NULL) {
-                Niflib::NiTransformInterpolatorRef ti =
-                    DynamicCast<Niflib::NiTransformInterpolator>(link.interpolator);
+                ti = DynamicCast<Niflib::NiTransformInterpolator>(link.interpolator);
                 if (ti != NULL) {
                     Niflib::NiTransformDataRef td = ti->GetData();
                     if (td != NULL) {
@@ -873,70 +866,181 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
                     kf_data = kfc->GetData();
                 }
             }
-            if (!kf_data) continue;
 
-            // --- Build track NodePath ---
-            // AnimationPlayer root = root_godot_node (its parent).
-            // Path from root to Skeleton3D, then ":bone_name" suffix.
-            String skel_path = skel_rel_path(skel);
-            if (skel_path.is_empty()) {
-                UtilityFunctions::push_warning("[ANIM] Skeleton3D not under root node, skipping bone: ",
-                    String::utf8(bone_name.c_str()));
+            // --- Try NiBSplineCompTransformInterpolator ---
+            Niflib::NiBSplineCompTransformInterpolatorRef bsi = NULL;
+            if (!ti && !kf_data && link.interpolator != NULL) {
+                bsi = DynamicCast<Niflib::NiBSplineCompTransformInterpolator>(link.interpolator);
+            }
+
+            // Skip non-transform controllers (NiVisController, NiAlphaController, etc.)
+            if (!ti && !kf_data && !bsi) {
+                if (link.interpolator != NULL) {
+                    UtilityFunctions::push_warning("[ANIM] Skipping unsupported interpolator type '",
+                        String::utf8(link.interpolator->GetType().GetTypeName().c_str()),
+                        "' for target '", String::utf8(target_name.c_str()), "'");
+                }
                 continue;
             }
-            String bone_track_path = skel_path + ":" + String::utf8(bone_name.c_str());
 
-            // Look up the correction transform for this bone.
-            // C converts NIF-parent-local → Godot-bone-parent-local space.
-            // Position:  corrected = C.basis * pos + C.origin
-            // Rotation:  corrected = C_rot * rot
-            godot::Transform3D C;
-            godot::Quaternion C_rot;
-            {
-                auto corr_it = bone_anim_correction.find(bone_name);
-                if (corr_it != bone_anim_correction.end()) {
-                    C = corr_it->second;
+            // --- Find bone in skeleton cache ---
+            Skeleton3D* skel = nullptr;
+            for (auto& skel_entry : skeleton_cache) {
+                int idx = skel_entry.second->find_bone(
+                    String::utf8(target_name.c_str()));
+                if (idx >= 0) {
+                    skel = skel_entry.second;
+                    break;
                 }
-                C_rot = C.basis.get_rotation_quaternion();
             }
 
-            // --- Translation track ---
+            // Determine track path: bone track (Skeleton3D:BoneName) or scene graph node track.
+            String track_path;
+
+            if (skel) {
+                // --- Bone track ---
+                String skel_path = node_rel_path(skel);
+                if (skel_path.is_empty()) {
+                    UtilityFunctions::push_warning("[ANIM] Skeleton3D not under root node, skipping bone: ",
+                        String::utf8(target_name.c_str()));
+                    continue;
+                }
+                track_path = skel_path + ":" + String::utf8(target_name.c_str());
+            } else {
+                // --- Scene graph node track (e.g. "MD", "MD NonAccum", "Editable Mesh") ---
+                Node3D* target_node = nullptr;
+                String search_name = String::utf8(target_name.c_str());
+                Node* found = root_godot_node->find_child(search_name, true, false);
+                if (found) target_node = Object::cast_to<Node3D>(found);
+
+                if (!target_node) continue;
+
+                track_path = node_rel_path(target_node);
+                if (track_path.is_empty()) continue;
+            }
+
+            // --- Inline interpolator fallback ---
+            if (!kf_data && ti != NULL) {
+                Niflib::Vector3 it = ti->GetTranslation();
+                Niflib::Quaternion ir = ti->GetRotation();
+                bool has_trans = (it.x < 1e+18f && it.y < 1e+18f && it.z < 1e+18f);
+                bool has_rot = !(ir.w == 0.0f && ir.x == 0.0f && ir.y == 0.0f && ir.z == 0.0f)
+                            && (std::abs(ir.w) < 1e+18f && std::abs(ir.x) < 1e+18f
+                             && std::abs(ir.y) < 1e+18f && std::abs(ir.z) < 1e+18f);
+
+                if (has_trans) {
+                    int track = anim->add_track(Animation::TYPE_POSITION_3D);
+                    anim->track_set_path(track, NodePath(track_path));
+                    godot::Vector3 pos = nif_to_godot_vec3(it);
+                    anim->position_track_insert_key(track, 0.0, pos);
+                }
+                if (has_rot) {
+                    int track = anim->add_track(Animation::TYPE_ROTATION_3D);
+                    anim->track_set_path(track, NodePath(track_path));
+                    godot::Quaternion rot = nif_quat_to_godot(ir);
+                    anim->rotation_track_insert_key(track, 0.0, rot);
+                }
+                if (has_trans || has_rot) tracks_created++;
+                continue;
+            }
+
+            // --- B-spline compressed transform interpolator ---
+            if (bsi) {
+                unsigned int npts = bsi->GetNumControlPoints();
+                if (npts < 2) npts = 2;
+                int degree = 3;  // cubic B-spline
+
+                // Translation
+                auto bsp_trans = bsi->SampleTranslateKeys(npts, degree);
+                if (!bsp_trans.empty()) {
+                    int track = anim->add_track(Animation::TYPE_POSITION_3D);
+                    anim->track_set_path(track, NodePath(track_path));
+                    for (const auto& k : bsp_trans) {
+                        godot::Vector3 pos = nif_to_godot_vec3(k.data);
+                        anim->position_track_insert_key(track, k.time - seq_start, pos);
+                    }
+                }
+
+                // Rotation
+                auto bsp_rot = bsi->SampleQuatRotateKeys(npts, degree);
+                if (!bsp_rot.empty()) {
+                    int track = anim->add_track(Animation::TYPE_ROTATION_3D);
+                    anim->track_set_path(track, NodePath(track_path));
+                    for (const auto& k : bsp_rot) {
+                        godot::Quaternion rot = nif_quat_to_godot(k.data);
+                        anim->rotation_track_insert_key(track, k.time - seq_start, rot);
+                    }
+                    bspline_rot_count++;
+                }
+
+                tracks_created++;
+                continue;
+            }
+
+            if (!kf_data) continue;
+
+            // --- Translation track (keyframe data) ---
             auto trans_keys = kf_data->GetTranslateKeys();
             if (!trans_keys.empty()) {
                 int track = anim->add_track(Animation::TYPE_POSITION_3D);
-                anim->track_set_path(track, NodePath(bone_track_path));
+                anim->track_set_path(track, NodePath(track_path));
                 for (const Niflib::Key<Niflib::Vector3>& k : trans_keys) {
-                    godot::Vector3 pos = C.basis.xform(nif_to_godot_vec3(k.data)) + C.origin;
+                    godot::Vector3 pos = nif_to_godot_vec3(k.data);
                     anim->position_track_insert_key(track, k.time - seq_start, pos);
                 }
             }
 
-            // --- Rotation track ---
+            // --- Rotation track (keyframe data) ---
             if (kf_data->GetRotateType() == Niflib::XYZ_ROTATION_KEY) {
-                if (!xyz_warned) {
-                    UtilityFunctions::print("[ANIM] XYZ Euler rotation keys not yet supported"
-                        " — rotation skipped for clip '",
-                        String::utf8(action.action_name.c_str()), "'");
-                    xyz_warned = true;
+                // NIF XYZ_ROTATION_KEY: separate float-key arrays per axis (Euler angles).
+                // Intrinsic XYZ order verified from OpenMW (components/nifosg/controller.cpp).
+                auto x_keys = kf_data->GetXRotateKeys();
+                auto y_keys = kf_data->GetYRotateKeys();
+                auto z_keys = kf_data->GetZRotateKeys();
+
+                // Collect all unique timestamps across the three axes
+                std::set<float> euler_times;
+                for (const auto& k : x_keys) euler_times.insert(k.time);
+                for (const auto& k : y_keys) euler_times.insert(k.time);
+                for (const auto& k : z_keys) euler_times.insert(k.time);
+
+                if (!euler_times.empty()) {
+                    int track = anim->add_track(Animation::TYPE_ROTATION_3D);
+                    anim->track_set_path(track, NodePath(track_path));
+
+                    for (float t : euler_times) {
+                        float rx = sample_float_keys(x_keys, t);
+                        float ry = sample_float_keys(y_keys, t);
+                        float rz = sample_float_keys(z_keys, t);
+
+                        godot::Quaternion rot = nif_euler_xyz_to_godot(rx, ry, rz);
+                        anim->rotation_track_insert_key(track, t - seq_start, rot);
+                    }
+                    euler_rot_count++;
                 }
             } else {
                 auto quat_keys = kf_data->GetQuatRotateKeys();
                 if (!quat_keys.empty()) {
                     int track = anim->add_track(Animation::TYPE_ROTATION_3D);
-                    anim->track_set_path(track, NodePath(bone_track_path));
+                    anim->track_set_path(track, NodePath(track_path));
                     for (const Niflib::Key<Niflib::Quaternion>& k : quat_keys) {
-                        godot::Quaternion rot = C_rot * nif_quat_to_godot(k.data);
+                        godot::Quaternion rot = nif_quat_to_godot(k.data);
                         anim->rotation_track_insert_key(
                             track, k.time - seq_start, rot);
                     }
+                    quat_rot_count++;
                 }
             }
             tracks_created++;
             // Scale keys deferred.
         }
 
-        UtilityFunctions::print("[ANIM]   -> '", String::utf8(action.action_name.c_str()),
-            "': ", tracks_created, "/", (int)ctrl_data.size(), " controllers mapped to bone tracks");
+        UtilityFunctions::print("[ANIM] clip='",
+            String::utf8(action.action_name.c_str()),
+            "' tracks=", tracks_created,
+            " rot_euler=", euler_rot_count,
+            " rot_quat=", quat_rot_count,
+            " rot_bspline=", bspline_rot_count);
 
         // Use action_name as clip name; fall back to filename stem
         String anim_name = String::utf8(action.action_name.c_str());
@@ -972,6 +1076,11 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         NiNodeRef root_node = DynamicCast<NiNode>(ref_root);
         if (root_node) {
             process_ni_node(root_node, godotnode, base_path);
+
+            // Reparent attachment nodes (weapons, props) from static Node3D
+            // tree to BoneAttachment3D on the Skeleton3D so they follow
+            // animated bones.
+            reparent_bone_attachments(root_node, godotnode);
         } else {
             // Edge case: root is a single NiTriShape (rare)
             NiTriShapeRef root_shape = DynamicCast<NiTriShape>(ref_root);
@@ -994,7 +1103,6 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         current_nif_dir = "";
         bone_index_map.clear();
         skeleton_cache.clear();
-        bone_anim_correction.clear();
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -1015,17 +1123,12 @@ std::string GdextNiflib::nif_display_name(const Niflib::NiObjectRef& obj) {
 // Applies the NIF node's local transform (translation, rotation, scale) to a Godot Node3D.
 void GdextNiflib::apply_nif_transform(NiAVObjectRef av_obj, Node3D* godot_node) {
     if (!av_obj || !godot_node) return;
-
-    // Translation
-    Niflib::Vector3 t = av_obj->GetLocalTranslation();
-    godot_node->set_position(nif_to_godot_vec3(t));
-
-    // Uniform scale
-    float s = av_obj->GetLocalScale();
-    godot_node->set_scale(godot::Vector3(s, s, s));
-
-    // Rotation: NIF Matrix33 -> Godot Basis via shared helper
-    godot_node->set_basis(nif_matrix33_to_godot(av_obj->GetLocalRotation()));
+    // Build basis from rotation, then bake uniform scale into it.
+    // Previous code called set_scale() then set_basis() — set_basis() overwrites scale.
+    godot::Basis basis = nif_matrix33_to_godot(av_obj->GetLocalRotation());
+    apply_uniform_scale(basis, av_obj->GetLocalScale());
+    godot_node->set_transform(godot::Transform3D(
+        basis, nif_to_godot_vec3(av_obj->GetLocalTranslation())));
 }
 
 // =============================================================================
@@ -1523,6 +1626,74 @@ Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const Stri
 }
 
 // =============================================================================
+// Bone attachment reparenting
+// =============================================================================
+// After process_ni_node(), attachment nodes (weapons, props) sit under static
+// bone-mirror Node3Ds.  This pass finds NIF nodes whose parent is a skeleton
+// bone but which are NOT bones themselves, and reparents the corresponding
+// Godot Node3D under a BoneAttachment3D on the Skeleton3D.
+
+void GdextNiflib::reparent_bone_attachments(NiNodeRef ni_node, Node3D* root_godot_node) {
+    if (!ni_node || skeleton_cache.empty()) return;
+    for (auto& [skel_root, skeleton] : skeleton_cache) {
+        reparent_bone_attachments_recursive(skel_root, skeleton, root_godot_node);
+    }
+}
+
+void GdextNiflib::reparent_bone_attachments_recursive(
+        NiNodeRef ni_node, Skeleton3D* skeleton, Node3D* root_godot_node) {
+    if (!ni_node) return;
+
+    std::string name = ni_node->GetName();
+    int bone_idx = skeleton->find_bone(String::utf8(name.c_str()));
+
+    if (bone_idx >= 0) {
+        // This NIF node IS a bone — check children for non-bone attachment nodes.
+        for (const auto& child : ni_node->GetChildren()) {
+            NiNodeRef child_node = DynamicCast<NiNode>(child);
+            if (!child_node) continue;
+
+            std::string child_name = child_node->GetName();
+            if (skeleton->find_bone(String::utf8(child_name.c_str())) >= 0)
+                continue;  // child is also a bone, skip
+
+            // Child is NOT a bone but parent IS — this is an attachment node.
+            Node* found = root_godot_node->find_child(
+                String::utf8(child_name.c_str()), true, false);
+            Node3D* attachment_node = found ? Object::cast_to<Node3D>(found) : nullptr;
+            if (!attachment_node) continue;
+
+            // Debug: log attachment reparenting details
+            godot::Transform3D att_xform = attachment_node->get_transform();
+            Niflib::Vector3 nif_t = child_node->GetLocalTranslation();
+            Niflib::Matrix33 nif_r = child_node->GetLocalRotation();
+            UtilityFunctions::print("[ATTACH] '", String::utf8(child_name.c_str()),
+                "' -> bone '", String::utf8(name.c_str()), "' (idx=", bone_idx, ")",
+                " nif_local_pos=(", nif_t.x, ",", nif_t.y, ",", nif_t.z, ")",
+                " godot_local_pos=(", att_xform.origin.x, ",", att_xform.origin.y, ",", att_xform.origin.z, ")");
+
+            BoneAttachment3D* ba = memnew(BoneAttachment3D);
+            ba->set_bone_name(String::utf8(name.c_str()));
+            ba->set_bone_idx(bone_idx);
+            skeleton->add_child(ba);
+
+            // Reparent: the node already has its NIF local transform applied
+            // (relative to the bone), which is what BoneAttachment3D expects.
+            attachment_node->get_parent()->remove_child(attachment_node);
+            ba->add_child(attachment_node);
+        }
+    }
+
+    // Recurse into children to find deeper bone → non-bone transitions.
+    for (const auto& child : ni_node->GetChildren()) {
+        NiNodeRef child_node = DynamicCast<NiNode>(child);
+        if (child_node) {
+            reparent_bone_attachments_recursive(child_node, skeleton, root_godot_node);
+        }
+    }
+}
+
+// =============================================================================
 // Scene graph traversal
 // =============================================================================
 // Recursively maps the NIF scene graph to Godot nodes.
@@ -1564,13 +1735,6 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
             if (skin != NULL) {
                 NiNodeRef skel_root = skin->GetSkeletonRoot();
                 std::vector<NiNodeRef> skin_bones = skin->GetBones();
-                UtilityFunctions::print("[DIAG] SKINNED NiTriShape: \"",
-                    String::utf8(shape_name.c_str()),
-                    "\" skel_root=\"",
-                    skel_root ? String::utf8(skel_root->GetName().c_str()) : String("<null>"),
-                    "\" bones=", (int)skin_bones.size(),
-                    " parent_node=\"", String::utf8(name.c_str()), "\"");
-
                 // Build or reuse Skeleton3D for this skeleton root
                 Skeleton3D* skeleton = nullptr;
 
@@ -1587,16 +1751,11 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                         int gidx = skeleton->find_bone(String::utf8(bname.c_str()));
                         if (gidx >= 0) bone_index_map[bone_node] = gidx;
                     }
-                    UtilityFunctions::print("[DIAG]   -> Using CACHED skeleton (",
-                        skeleton->get_bone_count(), " bones in skeleton vs ",
-                        (int)skin_bones.size(), " bones in this shape's skin)");
                 } else {
                     skeleton = build_skeleton(skin, ni_node);
                     if (skeleton) {
                         skeleton_cache[skel_root] = skeleton;
                         godot_node->add_child(skeleton);
-                        UtilityFunctions::print("[DIAG]   -> Built NEW skeleton under: ",
-                            String::utf8(name.c_str()));
                         if (debug_show_bones) {
                             debug_visualize_skeleton(skeleton);
                         }
@@ -1615,8 +1774,6 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     if (mesh_node) godot_node->add_child(mesh_node);
                 }
             } else {
-                UtilityFunctions::print("[DIAG] STATIC NiTriShape: \"",
-                    String::utf8(shape_name.c_str()), "\"");
                 Node3D* mesh_node = process_ni_tri_shape(tri_shape, base_path);
                 if (mesh_node) {
                     godot_node->add_child(mesh_node);
@@ -1629,13 +1786,6 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
             if (skin != NULL) {
                 NiNodeRef skel_root = skin->GetSkeletonRoot();
                 std::vector<NiNodeRef> skin_bones = skin->GetBones();
-                UtilityFunctions::print("[DIAG] SKINNED NiTriStrips: \"",
-                    String::utf8(strip_name.c_str()),
-                    "\" skel_root=\"",
-                    skel_root ? String::utf8(skel_root->GetName().c_str()) : String("<null>"),
-                    "\" bones=", (int)skin_bones.size(),
-                    " parent_node=\"", String::utf8(name.c_str()), "\"");
-
                 Skeleton3D* skeleton = nullptr;
                 auto cache_it = skeleton_cache.find(skel_root);
                 if (cache_it != skeleton_cache.end()) {
@@ -1648,16 +1798,11 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                         int gidx = skeleton->find_bone(String::utf8(bname.c_str()));
                         if (gidx >= 0) bone_index_map[bone_node] = gidx;
                     }
-                    UtilityFunctions::print("[DIAG]   -> Using CACHED skeleton (",
-                        skeleton->get_bone_count(), " bones in skeleton vs ",
-                        (int)skin_bones.size(), " bones in this shape's skin)");
                 } else {
                     skeleton = build_skeleton(skin, ni_node);
                     if (skeleton) {
                         skeleton_cache[skel_root] = skeleton;
                         godot_node->add_child(skeleton);
-                        UtilityFunctions::print("[DIAG]   -> Built NEW skeleton under: ",
-                            String::utf8(strip_name.c_str()));
                         if (debug_show_bones) {
                             debug_visualize_skeleton(skeleton);
                         }
@@ -1674,8 +1819,6 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     if (mesh_node) godot_node->add_child(mesh_node);
                 }
             } else {
-                UtilityFunctions::print("[DIAG] STATIC NiTriStrips: \"",
-                    String::utf8(strip_name.c_str()), "\"");
                 Node3D* mesh_node = process_ni_tri_strips(tri_strips, base_path);
                 if (mesh_node) {
                     godot_node->add_child(mesh_node);
