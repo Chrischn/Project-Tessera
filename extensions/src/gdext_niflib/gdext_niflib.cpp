@@ -65,6 +65,10 @@
 #include <obj/NiTransformData.h>
 #include <obj/NiKeyframeData.h>
 #include <obj/NiBSplineCompTransformInterpolator.h>
+#include <obj/NiFloatInterpolator.h>
+#include <obj/NiFloatData.h>
+#include <obj/NiBoolInterpolator.h>
+#include <obj/NiBoolData.h>
 #include <obj/NiStringPalette.h>
 #include <gen/ControllerLink.h>
 
@@ -873,8 +877,20 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
                 bsi = DynamicCast<Niflib::NiBSplineCompTransformInterpolator>(link.interpolator);
             }
 
-            // Skip non-transform controllers (NiVisController, NiAlphaController, etc.)
-            if (!ti && !kf_data && !bsi) {
+            // --- Try NiFloatInterpolator (alpha/transparency) ---
+            Niflib::NiFloatInterpolatorRef fi = NULL;
+            if (!ti && !kf_data && !bsi && link.interpolator != NULL) {
+                fi = DynamicCast<Niflib::NiFloatInterpolator>(link.interpolator);
+            }
+
+            // --- Try NiBoolInterpolator (visibility) ---
+            Niflib::NiBoolInterpolatorRef bi = NULL;
+            if (!ti && !kf_data && !bsi && !fi && link.interpolator != NULL) {
+                bi = DynamicCast<Niflib::NiBoolInterpolator>(link.interpolator);
+            }
+
+            // Skip truly unknown interpolator types
+            if (!ti && !kf_data && !bsi && !fi && !bi) {
                 if (link.interpolator != NULL) {
                     UtilityFunctions::push_warning("[ANIM] Skipping unsupported interpolator type '",
                         String::utf8(link.interpolator->GetType().GetTypeName().c_str()),
@@ -917,6 +933,56 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
 
                 track_path = node_rel_path(target_node);
                 if (track_path.is_empty()) continue;
+            }
+
+            // --- Float property track (alpha/transparency) ---
+            if (fi) {
+                if (skel) continue;  // float properties target scene nodes, not bones
+                Niflib::NiFloatDataRef fd = fi->GetData();
+                if (fd) {
+                    auto float_keys = fd->GetKeys();
+                    if (!float_keys.empty()) {
+                        int track = anim->add_track(Animation::TYPE_VALUE);
+                        anim->track_set_path(track, NodePath(track_path + ":transparency"));
+                        for (const auto& k : float_keys) {
+                            anim->track_insert_key(track, k.time - seq_start, 1.0f - k.data);
+                        }
+                        tracks_created++;
+                    }
+                } else {
+                    float alpha = fi->GetFloatValue();
+                    if (alpha < 1.0f) {
+                        int track = anim->add_track(Animation::TYPE_VALUE);
+                        anim->track_set_path(track, NodePath(track_path + ":transparency"));
+                        anim->track_insert_key(track, 0.0, 1.0f - alpha);
+                        tracks_created++;
+                    }
+                }
+                continue;
+            }
+
+            // --- Bool property track (visibility) ---
+            if (bi) {
+                if (skel) continue;  // visibility targets scene nodes, not bones
+                Niflib::NiBoolDataRef bd = bi->GetData();
+                if (bd) {
+                    auto bool_keys = bd->GetKeys();
+                    if (!bool_keys.empty()) {
+                        int track = anim->add_track(Animation::TYPE_VALUE);
+                        anim->track_set_path(track, NodePath(track_path + ":visible"));
+                        for (const auto& k : bool_keys) {
+                            anim->track_insert_key(track, k.time - seq_start, (bool)(k.data != 0));
+                        }
+                        tracks_created++;
+                    }
+                } else {
+                    bool vis = bi->GetBoolValue();
+                    int track = anim->add_track(Animation::TYPE_VALUE);
+                    anim->track_set_path(track, NodePath(track_path + ":visible"));
+                    anim->track_insert_key(track, 0.0, vis);
+                    tracks_created++;
+                }
+                continue;
             }
 
             // --- Inline interpolator fallback ---
