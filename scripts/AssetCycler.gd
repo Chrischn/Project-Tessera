@@ -1,11 +1,11 @@
 # =============================================================================
-# Script Name:        UnitCycler.gd
+# Script Name:        AssetCycler.gd
 # Author(s):          Chrischn89
 # Godot Version:      4.5
 # Description:
-#	Testing utility: cycle through all known unit NIFs in the 3D world.
-#	Press J to go to the previous unit, L to go to the next unit.
-#	Only one unit is visible at a time; each replacement appears at the
+#	Testing utility: cycle through all known NIFs in the 3D world.
+#	Press J to go to the previous asset, L to go to the next asset.
+#	Only one asset is visible at a time; each replacement appears at the
 #	same world position as its predecessor.
 #
 # Usage:
@@ -19,11 +19,11 @@
 
 extends Node
 
-const START_UNIT := "axeman.nif"
+const START_ASSET := "axeman.nif"
 
-var _unit_paths: Array[String] = []
+var _asset_paths: Array[String] = []
 var _current_index: int = 0
-var _unit_container: Node3D = null
+var _asset_container: Node3D = null
 var _spawn_position: Vector3 = Vector3.ZERO
 var _base_path: String
 
@@ -37,8 +37,8 @@ var _debug_mode_names: Array[String] = [
 	"Grid",
 ]
 var _debug_hud_label: Label = null
-var _unit_name_label: Label = null
-var _unit_counter_label: Label = null
+var _asset_name_label: Label = null
+var _asset_counter_label: Label = null
 var _keybinds_label: Label = null
 var _grid_node: MeshInstance3D = null
 
@@ -55,17 +55,17 @@ var _material_override_active := false
 func setup(base_path: String) -> void:
 	_setup_debug_hud()
 	_base_path = base_path
-	_unit_paths = VFS.find_files("art/units", "nif")
-	print("UnitCycler: %d unit NIFs found" % _unit_paths.size())
-	if _unit_paths.is_empty():
-		push_error("UnitCycler: no unit NIFs found in VFS")
+	_asset_paths = VFS.find_files("art", "nif")
+	print("AssetCycler: %d NIFs found" % _asset_paths.size())
+	if _asset_paths.is_empty():
+		push_error("AssetCycler: no NIFs found in VFS")
 		return
-	for i in _unit_paths.size():
-		if _unit_paths[i].get_file().to_lower() == START_UNIT.to_lower():
+	for i in _asset_paths.size():
+		if _asset_paths[i].get_file().to_lower() == START_ASSET.to_lower():
 			_current_index = i
 			break
 	_create_grid_overlay()
-	_load_unit(_current_index)
+	_load_asset(_current_index)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -86,27 +86,27 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _cycle_animation() -> void:
 	if not _anim_player or _anim_clip_names.is_empty():
-		print("UnitCycler: no AnimationPlayer / clips on this unit")
+		print("AssetCycler: no AnimationPlayer / clips on this asset")
 		return
 	_anim_clip_index = (_anim_clip_index + 1) % _anim_clip_names.size()
 	var clip: String = _anim_clip_names[_anim_clip_index]
 	if clip == "(none)":
 		_anim_player.stop()
 		# Reset bone poses to rest so we see the pure rest pose
-		var skel := _find_skeleton(_unit_container)
+		var skel := _find_skeleton(_asset_container)
 		if skel:
 			skel.reset_bone_poses()
 		_update_anim_hud()
-		print("UnitCycler [ANIM]: stopped — showing REST POSE")
+		print("AssetCycler [ANIM]: stopped — showing REST POSE")
 		return
 	_anim_player.play(clip)
 	_update_anim_hud()
-	print("UnitCycler [ANIM]: playing '%s'" % clip)
+	print("AssetCycler [ANIM]: playing '%s'" % clip)
 	_print_clip_diagnostics(clip)
 
 
 func _print_clip_diagnostics(clip_name: String) -> void:
-	var skel := _find_skeleton(_unit_container)
+	var skel := _find_skeleton(_asset_container)
 	if not skel or not _anim_player:
 		return
 	var lib := _anim_player.get_animation_library("")
@@ -162,35 +162,35 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 
 
 func _cycle(direction: int) -> void:
-	if _unit_paths.is_empty():
+	if _asset_paths.is_empty():
 		return
-	_current_index = (_current_index + direction + _unit_paths.size()) % _unit_paths.size()
-	if _unit_container:
-		_spawn_position = _unit_container.position
-		_unit_container.free()
-		_unit_container = null
-	_load_unit(_current_index)
+	_current_index = (_current_index + direction + _asset_paths.size()) % _asset_paths.size()
+	if _asset_container:
+		_spawn_position = _asset_container.position
+		_asset_container.free()
+		_asset_container = null
+	_load_asset(_current_index)
 
 
-func _load_unit(index: int) -> void:
-	var nif_path: String = _unit_paths[index]
+func _load_asset(index: int) -> void:
+	var nif_path: String = _asset_paths[index]
 	var disk_path: String = VFS.get_file_as_disk_path(nif_path)
 	if disk_path == "":
-		push_error("UnitCycler: NIF not found in VFS: %s" % nif_path)
+		push_error("AssetCycler: NIF not found in VFS: %s" % nif_path)
 		return
 
 	var container := Node3D.new()
-	container.name = "UnitContainer"
+	container.name = "AssetContainer"
 	container.position = _spawn_position
 	get_parent().add_child(container)
-	_unit_container = container
+	_asset_container = container
 
 	# Extract .kfm and .kf files to disk so build_animations() can find them
 	# alongside the .nif (they may be packed inside FPK archives)
-	var unit_dir := nif_path.get_base_dir()
-	for kfm_path in VFS.find_files(unit_dir, "kfm"):
+	var asset_dir := nif_path.get_base_dir()
+	for kfm_path in VFS.find_files(asset_dir, "kfm"):
 		VFS.get_file_as_disk_path(kfm_path)
-	for kf_path in VFS.find_files(unit_dir, "kf"):
+	for kf_path in VFS.find_files(asset_dir, "kf"):
 		VFS.get_file_as_disk_path(kf_path)
 
 	var niflib := GdextNiflib.new()
@@ -198,7 +198,7 @@ func _load_unit(index: int) -> void:
 	# Blue used here as a visible test value; white = no tinting.
 	niflib.team_color = Color(0.2, 0.4, 1.0)
 	niflib.load_nif_scene(disk_path, container, _base_path)
-	print("UnitCycler [%d/%d]: %s" % [index + 1, _unit_paths.size(), nif_path])
+	print("AssetCycler [%d/%d]: %s" % [index + 1, _asset_paths.size(), nif_path])
 
 	_anim_player = null
 	_anim_clip_names = []
@@ -214,17 +214,17 @@ func _load_unit(index: int) -> void:
 		if _anim_clip_names.size() > 1:
 			# Auto-start with "(none)" = rest pose for diagnostic comparison
 			_anim_clip_index = 0
-			print("UnitCycler [ANIM]: showing REST POSE (%d clips + none)" \
+			print("AssetCycler [ANIM]: showing REST POSE (%d clips + none)" \
 				% [_anim_clip_names.size() - 1])
 		else:
-			print("UnitCycler [ANIM]: AnimationPlayer present but no clips")
+			print("AssetCycler [ANIM]: AnimationPlayer present but no clips")
 	else:
-		print("UnitCycler [ANIM]: no AnimationPlayer (static model)")
+		print("AssetCycler [ANIM]: no AnimationPlayer (static model)")
 	_update_anim_hud()
 	_apply_debug_mode()
 	if _material_override_active:
-		_apply_override_recursive(_unit_container, _make_diagnostic_mat())
-	_update_unit_hud()
+		_apply_override_recursive(_asset_container, _make_diagnostic_mat())
+	_update_asset_hud()
 
 
 # --- Debug visualization toggle (press I) ---
@@ -237,12 +237,12 @@ func _cycle_debug_mode() -> void:
 
 
 func _apply_debug_mode() -> void:
-	if not _unit_container:
+	if not _asset_container:
 		return
 
 	# Find all _BoneDebug nodes and mesh nodes in the scene tree
-	var debug_nodes := _find_nodes_by_name(_unit_container, "_BoneDebug")
-	var mesh_nodes := _find_mesh_instances(_unit_container)
+	var debug_nodes := _find_nodes_by_name(_asset_container, "_BoneDebug")
+	var mesh_nodes := _find_mesh_instances(_asset_container)
 
 	for dbg in debug_nodes:
 		var lines_node := dbg.get_node_or_null("_Lines")
@@ -347,8 +347,8 @@ func _toggle_material_override() -> void:
 	var override_mat: StandardMaterial3D = null
 	if _material_override_active:
 		override_mat = _make_diagnostic_mat()
-	if _unit_container:
-		_apply_override_recursive(_unit_container, override_mat)
+	if _asset_container:
+		_apply_override_recursive(_asset_container, override_mat)
 	print("[DIAG] Material override: ", "ON (flat red, cull_disabled)" if _material_override_active else "OFF (restored)")
 
 
@@ -441,7 +441,7 @@ func _setup_debug_hud() -> void:
 	# Left side: keybindings legend
 	_keybinds_label = Label.new()
 	_keybinds_label.text = \
-		"J / L    Prev / Next unit\n" + \
+		"J / L    Prev / Next asset\n" + \
 		"P        Next animation clip\n" + \
 		"I         Cycle debug mode\n" + \
 		"T        Material override\n" + \
@@ -463,45 +463,45 @@ func _setup_debug_hud() -> void:
 	_keybinds_label.offset_left = 10
 	canvas.add_child(_keybinds_label)
 
-	# Top-center: current unit filename
-	_unit_name_label = Label.new()
-	_unit_name_label.add_theme_font_size_override("font_size", 20)
-	_unit_name_label.add_theme_color_override("font_color", Color.WHITE)
-	_unit_name_label.add_theme_color_override("font_shadow_color", Color.BLACK)
-	_unit_name_label.add_theme_constant_override("shadow_offset_x", 1)
-	_unit_name_label.add_theme_constant_override("shadow_offset_y", 1)
-	_unit_name_label.anchor_left = 0.5
-	_unit_name_label.anchor_right = 0.5
-	_unit_name_label.anchor_top = 0.0
-	_unit_name_label.anchor_bottom = 0.0
-	_unit_name_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_unit_name_label.offset_top = 10
-	_unit_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	canvas.add_child(_unit_name_label)
+	# Top-center: current asset filename
+	_asset_name_label = Label.new()
+	_asset_name_label.add_theme_font_size_override("font_size", 20)
+	_asset_name_label.add_theme_color_override("font_color", Color.WHITE)
+	_asset_name_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	_asset_name_label.add_theme_constant_override("shadow_offset_x", 1)
+	_asset_name_label.add_theme_constant_override("shadow_offset_y", 1)
+	_asset_name_label.anchor_left = 0.5
+	_asset_name_label.anchor_right = 0.5
+	_asset_name_label.anchor_top = 0.0
+	_asset_name_label.anchor_bottom = 0.0
+	_asset_name_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_asset_name_label.offset_top = 10
+	_asset_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	canvas.add_child(_asset_name_label)
 
 	# Top-right: counter (current / total)
-	_unit_counter_label = Label.new()
-	_unit_counter_label.add_theme_font_size_override("font_size", 20)
-	_unit_counter_label.add_theme_color_override("font_color", Color.WHITE)
-	_unit_counter_label.add_theme_color_override("font_shadow_color", Color.BLACK)
-	_unit_counter_label.add_theme_constant_override("shadow_offset_x", 1)
-	_unit_counter_label.add_theme_constant_override("shadow_offset_y", 1)
-	_unit_counter_label.anchor_left = 1.0
-	_unit_counter_label.anchor_right = 1.0
-	_unit_counter_label.anchor_top = 0.0
-	_unit_counter_label.anchor_bottom = 0.0
-	_unit_counter_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_unit_counter_label.offset_top = 10
-	_unit_counter_label.offset_right = -10
-	_unit_counter_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	canvas.add_child(_unit_counter_label)
+	_asset_counter_label = Label.new()
+	_asset_counter_label.add_theme_font_size_override("font_size", 20)
+	_asset_counter_label.add_theme_color_override("font_color", Color.WHITE)
+	_asset_counter_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	_asset_counter_label.add_theme_constant_override("shadow_offset_x", 1)
+	_asset_counter_label.add_theme_constant_override("shadow_offset_y", 1)
+	_asset_counter_label.anchor_left = 1.0
+	_asset_counter_label.anchor_right = 1.0
+	_asset_counter_label.anchor_top = 0.0
+	_asset_counter_label.anchor_bottom = 0.0
+	_asset_counter_label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_asset_counter_label.offset_top = 10
+	_asset_counter_label.offset_right = -10
+	_asset_counter_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	canvas.add_child(_asset_counter_label)
 
 
-func _update_unit_hud() -> void:
-	if _unit_name_label:
-		_unit_name_label.text = _unit_paths[_current_index].get_file()
-	if _unit_counter_label:
-		_unit_counter_label.text = "%d / %d" % [_current_index + 1, _unit_paths.size()]
+func _update_asset_hud() -> void:
+	if _asset_name_label:
+		_asset_name_label.text = _asset_paths[_current_index].get_file()
+	if _asset_counter_label:
+		_asset_counter_label.text = "%d / %d" % [_current_index + 1, _asset_paths.size()]
 
 
 func _update_anim_hud() -> void:

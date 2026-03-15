@@ -24,7 +24,7 @@ var base_path : String = Global.load_value_from_config("GAME","original_folder_p
 func _ready() -> void:
 	print("GameWorld reached!")
 
-	var cycler := preload("res://scripts/UnitCycler.gd").new()
-	cycler.name = "UnitCycler"
+	var cycler := preload("res://scripts/AssetCycler.gd").new()
+	cycler.name = "AssetCycler"
 	add_child(cycler)
 	cycler.setup(base_path)
