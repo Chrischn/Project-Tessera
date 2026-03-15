@@ -1425,6 +1425,7 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
             // Pure alpha blend without test → real semi-transparency (glass, water, particles).
             // Exclude team-color meshes — those use ShaderMaterial.
             mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+            mat->set_depth_draw_mode(StandardMaterial3D::DEPTH_DRAW_ALWAYS);
         }
         // blend=1, test=1, threshold=0 → effectively opaque. Alpha test passes all pixels,
         // and if textures have alpha=1.0, blending produces opaque result. No transparency mode.
@@ -1651,6 +1652,9 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
     // NIF normals are already correct; unconditional generate_normals()
     // overrides them and can produce inverted lighting.
     if (!has_normals) st->generate_normals();
+
+    // Generate tangents for Forward+ renderer (needs TBN for normal-mapped materials).
+    if (has_uvs) st->generate_tangents();
 
     Ref<ArrayMesh> mesh = st->commit();
     if (!mesh.is_valid()) return nullptr;
