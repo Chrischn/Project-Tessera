@@ -1,0 +1,25 @@
+@startuml C3_Component
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Project Tessera — C3 Component (GDExtension Module)
+
+LAYOUT_WITH_LEGEND()
+
+Container(godot_project, "Godot Project", "Godot 4.5 / GDScript", "Calls into the GDExtension module at startup and runtime")
+
+Container_Boundary(gdextension, "GDExtension Module") {
+    Component(manifest,        "niflib.gdextension",  "INI manifest",  "Declares the DLL entry point and library paths; read by Godot at startup to locate and load the extension")
+    Component(register_types,  "register_types.cpp",  "C++",           "Extension entry point. Called by Godot on load; registers NifLibWrapper and other exposed classes with the engine")
+    Component(niflib_wrapper,  "gdext_niflib.cpp",    "C++",           "Implements NifLibWrapper: reads a .nif file path from GDScript, drives niflib parsing, and returns a Godot MeshInstance3D")
+}
+
+Container_Ext(niflib, "niflib", "C++ static library", "Provides NiObject tree parsing and NIF block traversal")
+
+Rel(godot_project,  manifest,       "Loaded by Godot via")
+Rel(manifest,       register_types, "Declares entry point, which calls")
+Rel(register_types, niflib_wrapper, "Registers class defined in")
+Rel(godot_project,  niflib_wrapper, "Calls load_nif() on",   "GDExtension API")
+Rel(niflib_wrapper, niflib,         "Parses .nif data with", "Static link")
+
+@enduml

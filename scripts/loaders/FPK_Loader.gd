@@ -90,8 +90,8 @@ static func parse_fpk_filelist(path: String, start_offset: int, entry_count: int
 		var path_len := file.get_32()
 		var path_bytes := file.get_buffer(path_len)
 		var file_path := rotate_packed_byte_array(path_bytes,-1).get_string_from_utf8()
-		var file_folder := file_path.get_slice("\\", file_path.get_slice_count("\\")-2)
-		var file_name = file_path.get_file()
+		var _file_folder := file_path.get_slice("\\", file_path.get_slice_count("\\")-2)
+		var _file_name = file_path.get_file()
 		var pos_after_path := file.get_position()
 		
 		# Read a preview buffer to locate 'bsu' (0x62 0x73 0x75) =  unencrypted 'art' to determine start of next file
@@ -129,8 +129,8 @@ static func parse_fpk_filelist(path: String, start_offset: int, entry_count: int
 		# Read the actual file data bytes
 		file.seek(file_offset) 		# Jump to the file section at the exact position where the file is according to the file list
 		var file_data := file.get_buffer(file_size) # Read file as byte code
-		filelist[file_folder + "\\" + file_name] = file_data 	# Add file to Dictionary. Filefolder + Filename is the key : Data is the value. CAUTION: Key might not be unique if there are two folders with two files with the same names inside the same .fpk archive! To change: adjust slice count for var file_folder
-		#sig_file.store_line("%s | %s | sig_len=%d | %s | %d | %s" % [file_path, rotate_packed_byte_array(path_bytes,+1).get_string_from_utf8(),sig_len, _signature_bytes.hex_encode(),filelist.size(),file_folder]) # Debug output
+		filelist[file_path] = file_data 	# Add file to Dictionary. Full internal path is the key (e.g. "art\units\submarine\submarine.dds") : Data is the value.
+		#sig_file.store_line("%s | %s | sig_len=%d | %s | %d | %s" % [file_path, rotate_packed_byte_array(path_bytes,+1).get_string_from_utf8(),sig_len, _signature_bytes.hex_encode(),filelist.size(),_file_folder]) # Debug output
 		file.seek(pos_before_next_file) 	# Jump to start of next file in filelist
 	# Loop continues 
 	#sig_file.store_line("%s" % [filelist.keys()]) # Debug output

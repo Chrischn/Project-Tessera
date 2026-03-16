@@ -29,9 +29,9 @@
 extends Node3D
 
 @export var cam: Camera3D
-@export var move_speed := 8.0
-@export var sprint_multiplier := 2.0
-@export var mouse_sens := 0.002
+@export var move_speed := 100.0
+@export var sprint_multiplier := 3.0
+@export var mouse_sens := 0.001
 
 var _pitch := 0.0  # in radiant
 
@@ -42,9 +42,12 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
-		# Yaw around the pivot (left/right)
+		# Yaw: rotate around the camera's own position (not the pivot origin)
+		var cam_world_pos := cam.global_position
 		rotate_y(-event.relative.x * mouse_sens)
-		# Camera pitch (up/down, clamped)
+		# Correct any position drift so the camera stays in place
+		global_position -= cam.global_position - cam_world_pos
+		# Pitch (up/down, clamped)
 		_pitch = clamp(_pitch - event.relative.y * mouse_sens, deg_to_rad(-89), deg_to_rad(89))
 		cam.rotation.x = _pitch
 	elif event.is_action_pressed("ui_cancel"):
@@ -53,9 +56,9 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	var dir := Vector3.ZERO
 
-	# WASD movement aligned to pivot, ignoring Y-axis for flat navigation
-	var fwd := -global_transform.basis.z; fwd.y = 0; fwd = fwd.normalized()
-	var right := global_transform.basis.x; right.y = 0; right = right.normalized()
+	# WASD movement aligned to camera view, ignoring Y-axis for flat navigation
+	var fwd := -cam.global_transform.basis.z; fwd.y = 0; fwd = fwd.normalized()
+	var right := cam.global_transform.basis.x; right.y = 0; right = right.normalized()
 
 	if Input.is_action_pressed("move_forward"): dir += fwd
 	if Input.is_action_pressed("move_back"):    dir -= fwd
