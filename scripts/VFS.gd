@@ -141,7 +141,6 @@ func get_file_data(path: String) -> PackedByteArray:
 	if fpk_key != "":
 		return _fpk_data[fpk_key]
 
-	push_warning("[VFS] File not found: %s" % path)
 	return PackedByteArray()
 
 
@@ -163,7 +162,6 @@ func get_file_as_disk_path(path: String) -> String:
 	if fpk_key != "":
 		return _extract_to_cache(fpk_key)
 
-	push_warning("[VFS] File not found: %s" % path)
 	return ""
 
 
