@@ -69,6 +69,10 @@
 #include <obj/NiFloatData.h>
 #include <obj/NiBoolInterpolator.h>
 #include <obj/NiBoolData.h>
+#include <obj/NiPoint3Interpolator.h>
+#include <obj/NiPosData.h>
+#include <obj/NiBSplineCompFloatInterpolator.h>
+#include <obj/NiBSplineCompPoint3Interpolator.h>
 #include <obj/NiStringPalette.h>
 #include <gen/ControllerLink.h>
 
@@ -85,6 +89,7 @@
 #include <godot_cpp/classes/animation.hpp>
 #include <godot_cpp/classes/animation_player.hpp>
 #include <godot_cpp/classes/animation_library.hpp>
+#include <godot_cpp/classes/file_access.hpp>
 //Standard Library
 #include <vector>
 #include <set>
@@ -549,14 +554,14 @@ godot::Ref<ImageTexture> GdextNiflib::load_dds_texture(
         search_paths.push_back(base_path.path_join(rel_path));
 
         for (const auto& path : search_paths) {
-            UtilityFunctions::print("[TEX] Fallback trying: ", path);
-            err = img->load(path);
-            if (err == OK) break;
+            if (FileAccess::file_exists(path)) {
+                err = img->load(path);
+                if (err == OK) break;
+            }
         }
     }
 
     if (err != OK) {
-        UtilityFunctions::print("[TEX] All paths failed for: ", rel_path);
         texture_cache[nif_tex_path] = godot::Ref<ImageTexture>();
         return godot::Ref<ImageTexture>();
     }
@@ -889,8 +894,26 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
                 bi = DynamicCast<Niflib::NiBoolInterpolator>(link.interpolator);
             }
 
+            // --- Try NiPoint3Interpolator (position) ---
+            Niflib::NiPoint3InterpolatorRef p3i = NULL;
+            if (!ti && !kf_data && !bsi && !fi && !bi && link.interpolator != NULL) {
+                p3i = DynamicCast<Niflib::NiPoint3Interpolator>(link.interpolator);
+            }
+
+            // --- Try NiBSplineCompFloatInterpolator (compressed float/alpha) ---
+            Niflib::NiBSplineCompFloatInterpolatorRef bsfi = NULL;
+            if (!ti && !kf_data && !bsi && !fi && !bi && !p3i && link.interpolator != NULL) {
+                bsfi = DynamicCast<Niflib::NiBSplineCompFloatInterpolator>(link.interpolator);
+            }
+
+            // --- Try NiBSplineCompPoint3Interpolator (compressed B-spline position) ---
+            Niflib::NiBSplineCompPoint3InterpolatorRef bsp3i = NULL;
+            if (!ti && !kf_data && !bsi && !fi && !bi && !p3i && !bsfi && link.interpolator != NULL) {
+                bsp3i = DynamicCast<Niflib::NiBSplineCompPoint3Interpolator>(link.interpolator);
+            }
+
             // Skip truly unknown interpolator types
-            if (!ti && !kf_data && !bsi && !fi && !bi) {
+            if (!ti && !kf_data && !bsi && !fi && !bi && !p3i && !bsfi && !bsp3i) {
                 if (link.interpolator != NULL) {
                     UtilityFunctions::push_warning("[ANIM] Skipping unsupported interpolator type '",
                         String::utf8(link.interpolator->GetType().GetTypeName().c_str()),
@@ -980,6 +1003,70 @@ void GdextNiflib::build_animations(const godot::String& nif_path,
                     int track = anim->add_track(Animation::TYPE_VALUE);
                     anim->track_set_path(track, NodePath(track_path + ":visible"));
                     anim->track_insert_key(track, 0.0, vis);
+                    tracks_created++;
+                }
+                continue;
+            }
+
+            // --- Point3 property track (position on scene nodes) ---
+            if (p3i) {
+                if (skel) continue;  // position properties target scene nodes, not bones
+                Niflib::NiPosDataRef pd = p3i->GetData();
+                if (pd) {
+                    auto pos_keys = pd->GetKeys();
+                    if (!pos_keys.empty()) {
+                        int track = anim->add_track(Animation::TYPE_POSITION_3D);
+                        anim->track_set_path(track, NodePath(track_path));
+                        for (const auto& k : pos_keys) {
+                            anim->position_track_insert_key(track, k.time - seq_start,
+                                nif_to_godot_vec3(k.data));
+                        }
+                        tracks_created++;
+                    }
+                } else {
+                    Niflib::Vector3 val = p3i->GetPoint3Value();
+                    if (val.x < 1e+18f && val.y < 1e+18f && val.z < 1e+18f) {
+                        int track = anim->add_track(Animation::TYPE_POSITION_3D);
+                        anim->track_set_path(track, NodePath(track_path));
+                        anim->position_track_insert_key(track, 0.0, nif_to_godot_vec3(val));
+                        tracks_created++;
+                    }
+                }
+                continue;
+            }
+
+            // --- B-spline compressed float interpolator (alpha/transparency) ---
+            if (bsfi) {
+                if (skel) continue;  // float properties target scene nodes, not bones
+                unsigned int npts = bsfi->GetNumControlPoints();
+                if (npts < 2) npts = 2;
+                int degree = 3;  // cubic B-spline
+                auto float_keys = bsfi->SampleKeys(npts, degree);
+                if (!float_keys.empty()) {
+                    int track = anim->add_track(Animation::TYPE_VALUE);
+                    anim->track_set_path(track, NodePath(track_path + ":transparency"));
+                    for (const auto& k : float_keys) {
+                        anim->track_insert_key(track, k.time - seq_start, 1.0f - k.data);
+                    }
+                    tracks_created++;
+                }
+                continue;
+            }
+
+            // --- B-spline compressed Point3 interpolator (position on scene nodes) ---
+            if (bsp3i) {
+                if (skel) continue;  // position properties target scene nodes, not bones
+                unsigned int npts = bsp3i->GetNumControlPoints();
+                if (npts < 2) npts = 2;
+                int degree = 3;  // cubic B-spline
+                auto pos_keys = bsp3i->SampleKeys(npts, degree);
+                if (!pos_keys.empty()) {
+                    int track = anim->add_track(Animation::TYPE_POSITION_3D);
+                    anim->track_set_path(track, NodePath(track_path));
+                    for (const auto& k : pos_keys) {
+                        anim->position_track_insert_key(track, k.time - seq_start,
+                            nif_to_godot_vec3(k.data));
+                    }
                     tracks_created++;
                 }
                 continue;
