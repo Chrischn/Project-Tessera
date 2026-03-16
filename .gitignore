@@ -24,18 +24,6 @@ build/
 .sconsign.dblite
 .sconsign.dblite.d/*
 
-# CMake-specific ignores
-*.cmake
-build_debug/
-build_release/
-**/CMakeCache.txt
-**/CMakeUserPresets.json
-**/CTestTestfile.cmake
-**/CPackConfig.cmake
-**/cmake_install.cmake
-**/install_manifest.txt
-**/compile_commands.json
-
 # VS/MSVC/Debug-specific ignores
 *.pdb
 *.ilk
@@ -47,7 +35,6 @@ build_release/
 
 # Project-specific ignores
 debug/
-release/
 bin/*
 external/godot-cpp/*
 external/niflib/build_vs2022_static/
