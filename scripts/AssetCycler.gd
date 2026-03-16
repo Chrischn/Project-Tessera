@@ -51,6 +51,11 @@ var _anim_hud_label: Label = null
 # Material override diagnostic (press T)
 var _material_override_active := false
 
+# Auto-cycle (press F5) — loads every asset once to surface errors in the log
+var _auto_cycle_active := false
+var _auto_cycle_index := 0
+var _auto_cycle_start_log_lines := 0
+
 
 func setup(base_path: String) -> void:
 	_setup_debug_hud()
@@ -71,6 +76,13 @@ func setup(base_path: String) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
+	# F5 always works (start/stop auto-cycle)
+	if event.keycode == KEY_F5:
+		_toggle_auto_cycle()
+		return
+	# Block all other keys during auto-cycle
+	if _auto_cycle_active:
+		return
 	match event.keycode:
 		KEY_J:
 			_cycle(-1)
@@ -82,6 +94,20 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_material_override()
 		KEY_P:
 			_cycle_animation()
+
+
+func _process(_delta: float) -> void:
+	if not _auto_cycle_active:
+		return
+	if _auto_cycle_index >= _asset_paths.size():
+		_finish_auto_cycle()
+		return
+	_current_index = _auto_cycle_index
+	if _asset_container:
+		_asset_container.free()
+		_asset_container = null
+	_load_asset(_current_index)
+	_auto_cycle_index += 1
 
 
 func _cycle_animation() -> void:
@@ -368,6 +394,52 @@ func _apply_override_recursive(node: Node, mat: Material) -> void:
 		_apply_override_recursive(child, mat)
 
 
+# --- Auto-cycle (F5) ---
+
+func _toggle_auto_cycle() -> void:
+	if _auto_cycle_active:
+		_auto_cycle_active = false
+		print("=== AUTO-CYCLE ABORTED at %d / %d ===" \
+			% [_auto_cycle_index, _asset_paths.size()])
+		return
+	_auto_cycle_start_log_lines = _count_log_lines()
+	_auto_cycle_index = 0
+	_auto_cycle_active = true
+	print("=== AUTO-CYCLE START: %d assets ===" % _asset_paths.size())
+
+
+func _finish_auto_cycle() -> void:
+	_auto_cycle_active = false
+	var errors := _count_log_errors_after(_auto_cycle_start_log_lines)
+	print("=== AUTO-CYCLE DONE: %d assets, %d errors ===" \
+		% [_asset_paths.size(), errors])
+
+
+func _count_log_lines() -> int:
+	var f := FileAccess.open("user://logs/godot.log", FileAccess.READ)
+	if not f:
+		return 0
+	var count := 0
+	while not f.eof_reached():
+		f.get_line()
+		count += 1
+	return count
+
+
+func _count_log_errors_after(start_line: int) -> int:
+	var f := FileAccess.open("user://logs/godot.log", FileAccess.READ)
+	if not f:
+		return 0
+	var line_num := 0
+	var errors := 0
+	while not f.eof_reached():
+		var line := f.get_line()
+		line_num += 1
+		if line_num > start_line and line.contains("ERROR"):
+			errors += 1
+	return errors
+
+
 # --- Grid overlay ---
 
 const GRID_HALF_EXTENT := 1000  # metres; 2km x 2km total, 1m cells
@@ -445,6 +517,7 @@ func _setup_debug_hud() -> void:
 		"P        Next animation clip\n" + \
 		"I         Cycle debug mode\n" + \
 		"T        Material override\n" + \
+		"F5       Auto-cycle all assets\n" + \
 		"WASD  Move   Shift  Sprint\n" + \
 		"Mouse  Look\n" + \
 		"Space / Ctrl  Up / Down\n" + \
