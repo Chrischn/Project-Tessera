@@ -1304,6 +1304,24 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
             // tree to BoneAttachment3D on the Skeleton3D so they follow
             // animated bones.
             reparent_bone_attachments(root_node, godotnode);
+
+            // Deferred rotation correction: apply for single-mesh mismatch skeletons.
+            // For multi-mesh skeletons the correction differs per mesh and can't be
+            // applied globally to the skeleton, so it is skipped.
+            for (auto& [skel_root_ni, skel] : skeleton_cache) {
+                auto rc_it = rotation_correction_cache.find(skel_root_ni);
+                if (rc_it == rotation_correction_cache.end()) continue;
+
+                int skinned_mesh_count = 0;
+                for (int ci = 0; ci < skel->get_child_count(); ++ci) {
+                    MeshInstance3D* mi = Object::cast_to<MeshInstance3D>(skel->get_child(ci));
+                    if (mi && mi->get_skin().is_valid()) skinned_mesh_count++;
+                }
+
+                if (skinned_mesh_count == 1) {
+                    skel->set_transform(rc_it->second);
+                }
+            }
         } else {
             // Edge case: root is a single NiTriShape (rare)
             NiTriShapeRef root_shape = DynamicCast<NiTriShape>(ref_root);
@@ -1327,6 +1345,7 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         bone_index_map.clear();
         skeleton_cache.clear();
         skin_cache.clear();
+        rotation_correction_cache.clear();
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -1820,6 +1839,21 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 Niflib::Matrix44 skin_bind_nif = prefix_nif * overall_nif * bw_nif;
                 godot::Transform3D skin_bind = nif_matrix44_to_godot(skin_bind_nif);
                 per_mesh_skin->set_bind_pose(it->second, skin_bind);
+            }
+
+            // Compute rotation correction R = bone_rest * custom_bind for first valid bone.
+            // Stored for deferred application to single-mesh skeletons in load_nif_scene.
+            if (rotation_correction_cache.find(skel_root) == rotation_correction_cache.end()) {
+                for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
+                    if (skin_bones[ci] == NULL) continue;
+                    auto cit = bone_index_map.find(skin_bones[ci]);
+                    if (cit == bone_index_map.end()) continue;
+
+                    godot::Transform3D bone_rest = compute_bone_global_rest(skeleton, cit->second);
+                    godot::Transform3D R = bone_rest * per_mesh_skin->get_bind_pose(cit->second);
+                    rotation_correction_cache[skel_root] = godot::Transform3D(R.basis.inverse(), godot::Vector3());
+                    break;
+                }
             }
         }
     }
