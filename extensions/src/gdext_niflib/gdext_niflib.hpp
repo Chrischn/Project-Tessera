@@ -84,11 +84,14 @@ public:
     void process_ni_node(Niflib::NiNodeRef ni_node, Node3D* parent_godot, const String& base_path);
     // Shared geometry builder for NiTriShape and NiTriStrips (both are NiTriBasedGeom).
     // Handles SurfaceTool build, skinning, material, and transform. Called by the two wrappers below.
-    Node3D* process_tri_geometry(Niflib::NiTriBasedGeomRef geom, const String& base_path, Skeleton3D* skeleton = nullptr);
+    Node3D* process_tri_geometry(Niflib::NiTriBasedGeomRef geom, const String& base_path,
+        Skeleton3D* skeleton = nullptr, Niflib::NiNodeRef parent_ni_node = Niflib::NiNodeRef());
     // Builds a MeshInstance3D from a NiTriShape (triangle list).
-    Node3D* process_ni_tri_shape(Niflib::NiTriShapeRef tri_shape, const String& base_path, Skeleton3D* skeleton = nullptr);
+    Node3D* process_ni_tri_shape(Niflib::NiTriShapeRef tri_shape, const String& base_path,
+        Skeleton3D* skeleton = nullptr, Niflib::NiNodeRef parent_ni_node = Niflib::NiNodeRef());
     // Builds a MeshInstance3D from a NiTriStrips (triangle strip, converted to triangles).
-    Node3D* process_ni_tri_strips(Niflib::NiTriStripsRef tri_strips, const String& base_path, Skeleton3D* skeleton = nullptr);
+    Node3D* process_ni_tri_strips(Niflib::NiTriStripsRef tri_strips, const String& base_path,
+        Skeleton3D* skeleton = nullptr, Niflib::NiNodeRef parent_ni_node = Niflib::NiNodeRef());
     // Applies NIF local transform (translation/rotation/scale) to a Godot Node3D.
     void apply_nif_transform(Niflib::NiAVObjectRef av_obj, Node3D* godot_node);
     // Builds a StandardMaterial3D from a NIF property list.
@@ -104,6 +107,10 @@ public:
     // Constructs a Skeleton3D with correct rest poses and an explicit Skin resource.
     // Populates bone_index_map. See critical design notes in gdext_niflib.cpp.
     Skeleton3D* build_skeleton(Niflib::NiSkinInstanceRef skin, Niflib::NiNodeRef parent_ni_node);
+    void grow_skeleton(Skeleton3D* skeleton, Niflib::NiSkinInstanceRef skin, Niflib::NiNodeRef parent_ni_node);
+    // Computes bone global rest by walking parent chain of local rests.
+    // Safe alternative to get_bone_global_rest() which has cache corruption issues.
+    godot::Transform3D compute_bone_global_rest(Skeleton3D* skeleton, int bone_idx);
     // Converts a NIF Matrix44 (world transform) to a Godot Transform3D with coord conversion.
     godot::Transform3D nif_matrix44_to_godot(const Niflib::Matrix44& mat);
 
@@ -136,6 +143,10 @@ public:
     // Maps NIF skeleton root NiNode* -> explicit Skin resource (inverse-rest bind poses).
     // Created once per skeleton via create_skin_from_rest_transforms(), shared across shapes.
     std::map<Niflib::NiNode*, godot::Ref<godot::Skin>> skin_cache;
+    // Maps NIF skeleton root NiNode* -> rotation correction Transform3D.
+    // Populated per-mesh in process_tri_geometry when NiSkinData mismatch is detected.
+    // Applied in load_nif_scene deferred pass only if ALL meshes on that skeleton use custom skins.
+    std::map<Niflib::NiNode*, godot::Transform3D> rotation_correction_cache;
 
     // --- Team color ---
     // Applied at runtime to all meshes that carry a DARK_MAP (slot 1) mask texture.

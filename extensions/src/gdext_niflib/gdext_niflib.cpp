@@ -256,6 +256,100 @@ static void normalize_bone_weights(
 //    -> every vertex gets the inverse-rest transform applied -> crumpled mesh.
 //    reset_bone_poses() sets pose[i] = rest[i] so the formula cancels correctly.
 //
+// Grows an existing skeleton with bones from a new NiSkinInstance.
+// Called when a cached skeleton is reused by a mesh that references bones
+// not in the original skeleton (e.g. cavalry: rein builds skeleton, then
+// CavalryHorse/CavalryRider add their own bones).
+void GdextNiflib::grow_skeleton(Skeleton3D* skeleton, NiSkinInstanceRef skin, NiNodeRef parent_ni_node) {
+    if (!skeleton || !skin) return;
+
+    std::vector<NiNodeRef> new_bones = skin->GetBones();
+    NiNodeRef skel_root = skin->GetSkeletonRoot();
+
+    // Collect existing skeleton bones by name for quick lookup.
+    std::set<std::string> existing_names;
+    for (int i = 0; i < skeleton->get_bone_count(); ++i) {
+        existing_names.insert(skeleton->get_bone_name(i).utf8().get_data());
+    }
+
+    // Find skin bones not in skeleton, plus intermediate ancestors.
+    std::set<NiNodeRef> to_add;
+    for (const auto& bone : new_bones) {
+        if (bone == NULL) continue;
+        if (existing_names.count(bone->GetName())) continue;
+        to_add.insert(bone);
+
+        // Walk up to find intermediate nodes between this bone and an existing bone.
+        NiNodeRef walk = bone->GetParent();
+        while (walk != NULL && walk != skel_root && walk != parent_ni_node) {
+            if (existing_names.count(walk->GetName())) break;  // reached existing bone
+            to_add.insert(walk);
+            walk = walk->GetParent();
+        }
+    }
+
+    if (to_add.empty()) return;
+
+    // Sort by depth (parents before children) so parents are added first.
+    std::vector<NiNodeRef> sorted_add(to_add.begin(), to_add.end());
+    std::sort(sorted_add.begin(), sorted_add.end(),
+        [&](const NiNodeRef& a, const NiNodeRef& b) {
+            int da = 0, db = 0;
+            for (NiNodeRef w = a->GetParent(); w != NULL && w != skel_root; w = w->GetParent()) da++;
+            for (NiNodeRef w = b->GetParent(); w != NULL && w != skel_root; w = w->GetParent()) db++;
+            return da < db;
+        });
+
+    // Add new bones to skeleton.
+    for (const auto& bone : sorted_add) {
+        std::string bone_name = bone->GetName();
+        if (bone_name.empty()) bone_name = "bone_" + std::to_string(skeleton->get_bone_count());
+
+        int godot_idx = skeleton->add_bone(String::utf8(bone_name.c_str()));
+        bone_index_map[bone] = godot_idx;
+
+        // Set parent: walk up NIF hierarchy to find a bone already in the skeleton.
+        NiNodeRef parent = bone->GetParent();
+        while (parent != NULL) {
+            auto it = bone_index_map.find(parent);
+            if (it != bone_index_map.end()) {
+                skeleton->set_bone_parent(godot_idx, it->second);
+                break;
+            }
+            // Also check by name (bone might have been added by original build_skeleton).
+            int pidx = skeleton->find_bone(String::utf8(parent->GetName().c_str()));
+            if (pidx >= 0) {
+                skeleton->set_bone_parent(godot_idx, pidx);
+                bone_index_map[parent] = pidx;  // cache for next lookups
+                break;
+            }
+            parent = parent->GetParent();
+        }
+
+        // Set rest transform from NiNode local.
+        godot::Transform3D rest = nif_matrix44_to_godot(bone->GetLocalTransform());
+        skeleton->set_bone_rest(godot_idx, rest);
+    }
+
+    // Re-initialize poses after adding new bones.
+    skeleton->reset_bone_poses();
+
+    UtilityFunctions::print("[SKIN] Grew skeleton by ", (int)sorted_add.size(),
+        " bones, now ", skeleton->get_bone_count(), " total");
+}
+
+// Computes bone global rest by walking parent chain of local rests.
+// Safe alternative to get_bone_global_rest() which has cache corruption issues.
+godot::Transform3D GdextNiflib::compute_bone_global_rest(Skeleton3D* skeleton, int bone_idx) {
+    godot::Transform3D global = skeleton->get_bone_rest(bone_idx);
+    int parent = skeleton->get_bone_parent(bone_idx);
+    while (parent >= 0) {
+        global = skeleton->get_bone_rest(parent) * global;
+        parent = skeleton->get_bone_parent(parent);
+    }
+    return global;
+}
+
 // Populates bone_index_map (NiNode* -> Godot bone index) for weight assignment.
 Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent_ni_node) {
     if (!skin) return nullptr;
@@ -352,116 +446,6 @@ Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent
         skeleton->set_bone_rest(bone_index_map[bone], rest);
     }
 
-    // Step 3b: Check if NiNode-derived rests match NiSkinData bind poses.
-    // Some NIFs (bear.nif) have wrong NiNode transforms — the real bind
-    // pose is only in NiSkinData. Compare a few skin bones to detect this.
-    // All NiSkinData math is done in NIF space using niflib's Matrix44 ops,
-    // then converted to Godot only at the end. This avoids the composition
-    // bug where nif_to_godot(A*B) != nif_to_godot(A) * nif_to_godot(B).
-    // SAFE: uses get_bone_rest() (local, no cache corruption) and manual
-    // parent-chain multiplication. Never calls get_bone_global_rest() here.
-    {
-        // Compute global rest from local rests (safe — avoids get_bone_global_rest).
-        auto compute_global_rest = [&](int gidx) -> godot::Transform3D {
-            godot::Transform3D global = skeleton->get_bone_rest(gidx);
-            int parent = skeleton->get_bone_parent(gidx);
-            while (parent >= 0) {
-                global = skeleton->get_bone_rest(parent) * global;
-                parent = skeleton->get_bone_parent(parent);
-            }
-            return global;
-        };
-
-        Niflib::Matrix44 overall_nif = skin_data->GetOverallTransform();
-
-        // Prefix: transform from parent_ni_node to skel_root, in NIF space.
-        // NiSkinData world rests are in skel_root space, but Godot skeleton
-        // bones are relative to parent_ni_node. Compose in NIF space.
-        Niflib::Matrix44 prefix_nif;  // default constructor = identity
-        NiNodeRef walk_node = parent_ni_node;
-        while (walk_node != NULL && walk_node != skel_root) {
-            prefix_nif = walk_node->GetLocalTransform() * prefix_nif;
-            walk_node = walk_node->GetParent();
-        }
-        Niflib::Matrix44 prefix_nif_inv = prefix_nif.Inverse();
-
-        // Compare NiNode-derived bind with NiSkinData bind for up to 3 skin bones.
-        // NiSkinData formula (NIF row-vector space):
-        //   bone_world = inv(bone_xform) * inv(overall) * inv(prefix)
-        // Proven by diagnostic: battleship hull d=0.000002 with bi*oi ordering.
-        bool needs_skindata_fallback = false;
-        unsigned int bones_checked = 0;
-        String mismatch_bone_name;
-        float mismatch_dist = 0.0f;
-        for (unsigned int i = 0; i < skin_bone_count && bones_checked < 3; ++i) {
-            if (bones[i] == NULL) continue;
-            auto it = bone_index_map.find(bones[i]);
-            if (it == bone_index_map.end()) continue;
-
-            godot::Transform3D ninode_world = compute_global_rest(it->second);
-
-            Niflib::Matrix44 bone_nif = skin_data->GetBoneTransform(i);
-            Niflib::Matrix44 bone_world_nif = bone_nif.Inverse() * overall_nif.Inverse() * prefix_nif_inv;
-            godot::Transform3D skindata_world = nif_matrix44_to_godot(bone_world_nif);
-
-            float dist = (ninode_world.origin - skindata_world.origin).length();
-            if (dist > 10.0f) {
-                needs_skindata_fallback = true;
-                mismatch_bone_name = skeleton->get_bone_name(it->second);
-                mismatch_dist = dist;
-                break;
-            }
-            bones_checked++;
-        }
-
-        if (needs_skindata_fallback) {
-            UtilityFunctions::print("[SKIN] NiNode/NiSkinData mismatch (bone=",
-                mismatch_bone_name, " dist=", mismatch_dist,
-                ") -- building custom Skin from NiSkinData");
-
-            // Build custom Skin with NiSkinData-derived bind poses.
-            // Keep NiNode bone rests (animations target them). The custom skin
-            // decouples the animation reference frame from the mesh deformation.
-            // skin_bind = inv(bone_world) = prefix * overall * bw  (NIF row-vector)
-            Ref<Skin> custom_skin;
-            custom_skin.instantiate();
-
-            for (unsigned int i = 0; i < skin_bone_count; ++i) {
-                if (bones[i] == NULL) continue;
-                auto it = bone_index_map.find(bones[i]);
-                if (it == bone_index_map.end()) continue;
-
-                Niflib::Matrix44 bw_nif = skin_data->GetBoneTransform(i);
-                Niflib::Matrix44 skin_bind_nif = prefix_nif * overall_nif * bw_nif;
-                godot::Transform3D skin_bind = nif_matrix44_to_godot(skin_bind_nif);
-
-                custom_skin->add_bind(it->second, skin_bind);
-            }
-
-            skin_cache[skel_root] = custom_skin;
-
-            // Compute rotation offset: the custom bind introduces a rotation
-            // that the NiNode scene hierarchy doesn't account for.
-            // R = bone_global_rest_ninode * custom_bind → identity if bind matches
-            // rests, but a rotation offset for mismatched models (bear).
-            // Apply inverse rotation to skeleton to correct visual orientation.
-            for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
-                if (bones[ci] == NULL) continue;
-                auto cit = bone_index_map.find(bones[ci]);
-                if (cit == bone_index_map.end()) continue;
-
-                godot::Transform3D bone_rest = compute_global_rest(cit->second);
-                Niflib::Matrix44 cbw = skin_data->GetBoneTransform(ci);
-                Niflib::Matrix44 cbind_nif = prefix_nif * overall_nif * cbw;
-                godot::Transform3D cbind = nif_matrix44_to_godot(cbind_nif);
-
-                godot::Transform3D R = bone_rest * cbind;
-                skeleton->set_transform(godot::Transform3D(R.basis.inverse(), godot::Vector3()));
-                break;  // one bone is enough
-            }
-        }
-    }
-
     // Initialize bone poses from rests.
     // In Godot 4, bone poses default to identity -- NOT the rest transform.
     // Without this, skinning computes: T = identity * inverse_rest = inverse_rest != identity.
@@ -472,11 +456,10 @@ Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent
         skin_bone_count, " skin + ", intermediate_count, " intermediate), root=",
         skel_root ? String::utf8(skel_root->GetName().c_str()) : String("<null>"));
 
-    // Create default Skin from rest transforms (only if Step 3b didn't build a custom one).
-    if (skin_cache.find(skel_root) == skin_cache.end()) {
-        Ref<Skin> skin_res = skeleton->create_skin_from_rest_transforms();
-        skin_cache[skel_root] = skin_res;
-    }
+    // Create default Skin from rest transforms. Per-mesh custom skins (for NiSkinData
+    // mismatch cases) are built in process_tri_geometry() instead.
+    Ref<Skin> skin_res = skeleton->create_skin_from_rest_transforms();
+    skin_cache[skel_root] = skin_res;
 
     return skeleton;
 }
@@ -1321,6 +1304,28 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
             // tree to BoneAttachment3D on the Skeleton3D so they follow
             // animated bones.
             reparent_bone_attachments(root_node, godotnode);
+
+            // Deferred rotation correction: only apply for single-mesh skeletons.
+            // Multi-mesh skeletons have different bone hierarchies per mesh, so a single
+            // rotation correction (computed from one mesh's bones) doesn't work for others.
+            for (auto& [skel_root_ni, skel] : skeleton_cache) {
+                auto rc_it = rotation_correction_cache.find(skel_root_ni);
+                if (rc_it == rotation_correction_cache.end()) continue;
+
+                int skinned_mesh_count = 0;
+                for (int ci = 0; ci < skel->get_child_count(); ++ci) {
+                    MeshInstance3D* mi = Object::cast_to<MeshInstance3D>(skel->get_child(ci));
+                    if (mi && mi->get_skin().is_valid()) skinned_mesh_count++;
+                }
+
+                if (skinned_mesh_count == 1) {
+                    skel->set_transform(rc_it->second);
+                    UtilityFunctions::print("[SKIN] Applied rotation correction (single-mesh skeleton)");
+                } else if (skinned_mesh_count > 1) {
+                    UtilityFunctions::print("[SKIN] Skipping rotation correction (",
+                        skinned_mesh_count, " meshes -- per-mesh R values differ)");
+                }
+            }
         } else {
             // Edge case: root is a single NiTriShape (rare)
             NiTriShapeRef root_shape = DynamicCast<NiTriShape>(ref_root);
@@ -1343,6 +1348,8 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         current_nif_dir = "";
         bone_index_map.clear();
         skeleton_cache.clear();
+        skin_cache.clear();
+        rotation_correction_cache.clear();
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -1668,7 +1675,8 @@ godot::Ref<Material> GdextNiflib::create_material_from_properties(
 // NiTriBasedGeomData base classes.  The two public wrappers below are thin
 // adapters that just forward here.
 // =============================================================================
-Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& base_path, Skeleton3D* skeleton) {
+Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& base_path,
+    Skeleton3D* skeleton, NiNodeRef parent_ni_node) {
     if (!geom) return nullptr;
 
     // --- Geometry data extraction ---
@@ -1767,6 +1775,86 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
         }
     }
 
+    // --- Per-mesh NiSkinData mismatch detection ---
+    // Each mesh independently checks whether NiNode rest poses match NiSkinData bind poses.
+    // If they don't, a per-mesh custom Skin is built instead of using the shared default.
+    godot::Ref<godot::Skin> per_mesh_skin;
+    if (is_skinned && parent_ni_node != NULL) {
+        Niflib::NiNodeRef skel_root = skin->GetSkeletonRoot();
+        Niflib::NiSkinDataRef sd = skin->GetSkinData();
+        Niflib::Matrix44 overall_nif = sd->GetOverallTransform();
+
+        // Prefix: transform from parent_ni_node up to skel_root, in NIF space.
+        Niflib::Matrix44 prefix_nif;
+        Niflib::NiNodeRef walk_node = parent_ni_node;
+        while (walk_node != NULL && walk_node != skel_root) {
+            prefix_nif = walk_node->GetLocalTransform() * prefix_nif;
+            walk_node = walk_node->GetParent();
+        }
+        Niflib::Matrix44 prefix_nif_inv = prefix_nif.Inverse();
+
+        // Compare NiNode-derived rest vs NiSkinData bind for up to 3 skin bones.
+        std::vector<Niflib::NiNodeRef> skin_bones = skin->GetBones();
+        unsigned int skin_bone_count = (unsigned int)skin_bones.size();
+        bool needs_custom_skin = false;
+        unsigned int bones_checked = 0;
+
+        for (unsigned int i = 0; i < skin_bone_count && bones_checked < 3; ++i) {
+            if (skin_bones[i] == NULL) continue;
+            auto it = bone_index_map.find(skin_bones[i]);
+            if (it == bone_index_map.end()) continue;
+
+            godot::Transform3D ninode_world = compute_bone_global_rest(skeleton, it->second);
+
+            Niflib::Matrix44 bone_nif = sd->GetBoneTransform(i);
+            Niflib::Matrix44 bone_world_nif = bone_nif.Inverse() * overall_nif.Inverse() * prefix_nif_inv;
+            godot::Transform3D skindata_world = nif_matrix44_to_godot(bone_world_nif);
+
+            float dist = (ninode_world.origin - skindata_world.origin).length();
+            if (dist > 10.0f) {
+                needs_custom_skin = true;
+                UtilityFunctions::print("[SKIN] Per-mesh mismatch for '",
+                    String::utf8(nif_display_name(StaticCast<NiObject>(geom)).c_str()),
+                    "' bone=", skeleton->get_bone_name(it->second),
+                    " dist=", dist);
+                break;
+            }
+            bones_checked++;
+        }
+
+        if (needs_custom_skin) {
+            per_mesh_skin.instantiate();
+            for (unsigned int i = 0; i < skin_bone_count; ++i) {
+                if (skin_bones[i] == NULL) continue;
+                auto it = bone_index_map.find(skin_bones[i]);
+                if (it == bone_index_map.end()) continue;
+
+                Niflib::Matrix44 bw_nif = sd->GetBoneTransform(i);
+                Niflib::Matrix44 skin_bind_nif = prefix_nif * overall_nif * bw_nif;
+                godot::Transform3D skin_bind = nif_matrix44_to_godot(skin_bind_nif);
+                per_mesh_skin->add_bind(it->second, skin_bind);
+            }
+
+            // Compute rotation correction for deferred application in load_nif_scene.
+            if (rotation_correction_cache.find(skel_root) == rotation_correction_cache.end()) {
+                for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
+                    if (skin_bones[ci] == NULL) continue;
+                    auto cit = bone_index_map.find(skin_bones[ci]);
+                    if (cit == bone_index_map.end()) continue;
+
+                    godot::Transform3D bone_rest = compute_bone_global_rest(skeleton, cit->second);
+                    Niflib::Matrix44 cbw = sd->GetBoneTransform(ci);
+                    Niflib::Matrix44 cbind_nif = prefix_nif * overall_nif * cbw;
+                    godot::Transform3D cbind = nif_matrix44_to_godot(cbind_nif);
+                    godot::Transform3D R = bone_rest * cbind;
+
+                    rotation_correction_cache[skel_root] = godot::Transform3D(R.basis.inverse(), godot::Vector3());
+                    break;
+                }
+            }
+        }
+    }
+
     // --- Build mesh via SurfaceTool ---
     Ref<SurfaceTool> st;
     st.instantiate();
@@ -1844,14 +1932,17 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
     mesh_instance->set_surface_override_material(0, mat);
 
     if (is_skinned && skeleton != nullptr) {
-        // ".." resolves to the parent Skeleton3D in the scene tree.
-        // The Skin resource gives bind_pose[i] = bone_global_rest[i].inverse(), so at rest
-        // bone_matrix = rest * inverse_rest = identity -> mesh renders in its bind pose.
         mesh_instance->set_skeleton_path(NodePath(".."));
-        NiNodeRef skel_root = skin->GetSkeletonRoot();
-        auto skin_it = skin_cache.find(skel_root);
-        if (skin_it != skin_cache.end() && skin_it->second.is_valid()) {
-            mesh_instance->set_skin(skin_it->second);
+        if (per_mesh_skin.is_valid()) {
+            // Per-mesh custom skin (NiSkinData mismatch detected for this mesh).
+            mesh_instance->set_skin(per_mesh_skin);
+        } else {
+            // Default skin from cache (NiNode rests match NiSkinData).
+            NiNodeRef skel_root = skin->GetSkeletonRoot();
+            auto skin_it = skin_cache.find(skel_root);
+            if (skin_it != skin_cache.end() && skin_it->second.is_valid()) {
+                mesh_instance->set_skin(skin_it->second);
+            }
         }
     } else {
         apply_nif_transform(StaticCast<NiAVObject>(geom), mesh_instance);
@@ -1861,12 +1952,14 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
 }
 
 // Thin wrappers — extract type-specific ref and delegate to process_tri_geometry().
-Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String& base_path, Skeleton3D* skeleton) {
-    return process_tri_geometry(DynamicCast<NiTriBasedGeom>(tri_shape), base_path, skeleton);
+Node3D* GdextNiflib::process_ni_tri_shape(NiTriShapeRef tri_shape, const String& base_path,
+    Skeleton3D* skeleton, NiNodeRef parent_ni_node) {
+    return process_tri_geometry(DynamicCast<NiTriBasedGeom>(tri_shape), base_path, skeleton, parent_ni_node);
 }
 
-Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const String& base_path, Skeleton3D* skeleton) {
-    return process_tri_geometry(DynamicCast<NiTriBasedGeom>(tri_strips), base_path, skeleton);
+Node3D* GdextNiflib::process_ni_tri_strips(NiTriStripsRef tri_strips, const String& base_path,
+    Skeleton3D* skeleton, NiNodeRef parent_ni_node) {
+    return process_tri_geometry(DynamicCast<NiTriBasedGeom>(tri_strips), base_path, skeleton, parent_ni_node);
 }
 
 // =============================================================================
@@ -1989,11 +2082,22 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     // The cached skeleton was built for a previous shape; its bone_index_map may
                     // be stale if this shape references different bone nodes.
                     bone_index_map.clear();
+                    bool has_missing = false;
                     for (const auto& bone_node : skin_bones) {
                         if (bone_node == NULL) continue;
                         std::string bname = bone_node->GetName();
                         int gidx = skeleton->find_bone(String::utf8(bname.c_str()));
-                        if (gidx >= 0) bone_index_map[bone_node] = gidx;
+                        if (gidx >= 0) {
+                            bone_index_map[bone_node] = gidx;
+                        } else {
+                            has_missing = true;
+                        }
+                    }
+                    if (has_missing) {
+                        grow_skeleton(skeleton, skin, ni_node);
+                        // Regenerate default skin for the expanded skeleton
+                        Ref<Skin> skin_res = skeleton->create_skin_from_rest_transforms();
+                        skin_cache[skel_root] = skin_res;
                     }
                 } else {
                     skeleton = build_skeleton(skin, ni_node);
@@ -2007,7 +2111,7 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                 }
 
                 if (skeleton) {
-                    Node3D* mesh_node = process_ni_tri_shape(tri_shape, base_path, skeleton);
+                    Node3D* mesh_node = process_ni_tri_shape(tri_shape, base_path, skeleton, ni_node);
                     if (mesh_node) {
                         skeleton->add_child(mesh_node);
                     }
@@ -2036,11 +2140,22 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     skeleton = cache_it->second;
                     // Rebuild bone_index_map for this shape's bone set from the cached skeleton.
                     bone_index_map.clear();
+                    bool has_missing = false;
                     for (const auto& bone_node : skin_bones) {
                         if (bone_node == NULL) continue;
                         std::string bname = bone_node->GetName();
                         int gidx = skeleton->find_bone(String::utf8(bname.c_str()));
-                        if (gidx >= 0) bone_index_map[bone_node] = gidx;
+                        if (gidx >= 0) {
+                            bone_index_map[bone_node] = gidx;
+                        } else {
+                            has_missing = true;
+                        }
+                    }
+                    if (has_missing) {
+                        grow_skeleton(skeleton, skin, ni_node);
+                        // Regenerate default skin for the expanded skeleton
+                        Ref<Skin> skin_res = skeleton->create_skin_from_rest_transforms();
+                        skin_cache[skel_root] = skin_res;
                     }
                 } else {
                     skeleton = build_skeleton(skin, ni_node);
@@ -2054,7 +2169,7 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                 }
 
                 if (skeleton) {
-                    Node3D* mesh_node = process_ni_tri_strips(tri_strips, base_path, skeleton);
+                    Node3D* mesh_node = process_ni_tri_strips(tri_strips, base_path, skeleton, ni_node);
                     if (mesh_node) {
                         skeleton->add_child(mesh_node);
                     }
