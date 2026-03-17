@@ -352,6 +352,116 @@ Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent
         skeleton->set_bone_rest(bone_index_map[bone], rest);
     }
 
+    // Step 3b: Check if NiNode-derived rests match NiSkinData bind poses.
+    // Some NIFs (bear.nif) have wrong NiNode transforms — the real bind
+    // pose is only in NiSkinData. Compare a few skin bones to detect this.
+    // All NiSkinData math is done in NIF space using niflib's Matrix44 ops,
+    // then converted to Godot only at the end. This avoids the composition
+    // bug where nif_to_godot(A*B) != nif_to_godot(A) * nif_to_godot(B).
+    // SAFE: uses get_bone_rest() (local, no cache corruption) and manual
+    // parent-chain multiplication. Never calls get_bone_global_rest() here.
+    {
+        // Compute global rest from local rests (safe — avoids get_bone_global_rest).
+        auto compute_global_rest = [&](int gidx) -> godot::Transform3D {
+            godot::Transform3D global = skeleton->get_bone_rest(gidx);
+            int parent = skeleton->get_bone_parent(gidx);
+            while (parent >= 0) {
+                global = skeleton->get_bone_rest(parent) * global;
+                parent = skeleton->get_bone_parent(parent);
+            }
+            return global;
+        };
+
+        Niflib::Matrix44 overall_nif = skin_data->GetOverallTransform();
+
+        // Prefix: transform from parent_ni_node to skel_root, in NIF space.
+        // NiSkinData world rests are in skel_root space, but Godot skeleton
+        // bones are relative to parent_ni_node. Compose in NIF space.
+        Niflib::Matrix44 prefix_nif;  // default constructor = identity
+        NiNodeRef walk_node = parent_ni_node;
+        while (walk_node != NULL && walk_node != skel_root) {
+            prefix_nif = walk_node->GetLocalTransform() * prefix_nif;
+            walk_node = walk_node->GetParent();
+        }
+        Niflib::Matrix44 prefix_nif_inv = prefix_nif.Inverse();
+
+        // Compare NiNode-derived bind with NiSkinData bind for up to 3 skin bones.
+        // NiSkinData formula (NIF row-vector space):
+        //   bone_world = inv(bone_xform) * inv(overall) * inv(prefix)
+        // Proven by diagnostic: battleship hull d=0.000002 with bi*oi ordering.
+        bool needs_skindata_fallback = false;
+        unsigned int bones_checked = 0;
+        String mismatch_bone_name;
+        float mismatch_dist = 0.0f;
+        for (unsigned int i = 0; i < skin_bone_count && bones_checked < 3; ++i) {
+            if (bones[i] == NULL) continue;
+            auto it = bone_index_map.find(bones[i]);
+            if (it == bone_index_map.end()) continue;
+
+            godot::Transform3D ninode_world = compute_global_rest(it->second);
+
+            Niflib::Matrix44 bone_nif = skin_data->GetBoneTransform(i);
+            Niflib::Matrix44 bone_world_nif = bone_nif.Inverse() * overall_nif.Inverse() * prefix_nif_inv;
+            godot::Transform3D skindata_world = nif_matrix44_to_godot(bone_world_nif);
+
+            float dist = (ninode_world.origin - skindata_world.origin).length();
+            if (dist > 10.0f) {
+                needs_skindata_fallback = true;
+                mismatch_bone_name = skeleton->get_bone_name(it->second);
+                mismatch_dist = dist;
+                break;
+            }
+            bones_checked++;
+        }
+
+        if (needs_skindata_fallback) {
+            UtilityFunctions::print("[SKIN] NiNode/NiSkinData mismatch (bone=",
+                mismatch_bone_name, " dist=", mismatch_dist,
+                ") -- building custom Skin from NiSkinData");
+
+            // Build custom Skin with NiSkinData-derived bind poses.
+            // Keep NiNode bone rests (animations target them). The custom skin
+            // decouples the animation reference frame from the mesh deformation.
+            // skin_bind = inv(bone_world) = prefix * overall * bw  (NIF row-vector)
+            Ref<Skin> custom_skin;
+            custom_skin.instantiate();
+
+            for (unsigned int i = 0; i < skin_bone_count; ++i) {
+                if (bones[i] == NULL) continue;
+                auto it = bone_index_map.find(bones[i]);
+                if (it == bone_index_map.end()) continue;
+
+                Niflib::Matrix44 bw_nif = skin_data->GetBoneTransform(i);
+                Niflib::Matrix44 skin_bind_nif = prefix_nif * overall_nif * bw_nif;
+                godot::Transform3D skin_bind = nif_matrix44_to_godot(skin_bind_nif);
+
+                custom_skin->add_bind(it->second, skin_bind);
+            }
+
+            skin_cache[skel_root] = custom_skin;
+
+            // Compute rotation offset: the custom bind introduces a rotation
+            // that the NiNode scene hierarchy doesn't account for.
+            // R = bone_global_rest_ninode * custom_bind → identity if bind matches
+            // rests, but a rotation offset for mismatched models (bear).
+            // Apply inverse rotation to skeleton to correct visual orientation.
+            for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
+                if (bones[ci] == NULL) continue;
+                auto cit = bone_index_map.find(bones[ci]);
+                if (cit == bone_index_map.end()) continue;
+
+                godot::Transform3D bone_rest = compute_global_rest(cit->second);
+                Niflib::Matrix44 cbw = skin_data->GetBoneTransform(ci);
+                Niflib::Matrix44 cbind_nif = prefix_nif * overall_nif * cbw;
+                godot::Transform3D cbind = nif_matrix44_to_godot(cbind_nif);
+
+                godot::Transform3D R = bone_rest * cbind;
+                skeleton->set_transform(godot::Transform3D(R.basis.inverse(), godot::Vector3()));
+                break;  // one bone is enough
+            }
+        }
+    }
+
     // Initialize bone poses from rests.
     // In Godot 4, bone poses default to identity -- NOT the rest transform.
     // Without this, skinning computes: T = identity * inverse_rest = inverse_rest != identity.
@@ -362,33 +472,10 @@ Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent
         skin_bone_count, " skin + ", intermediate_count, " intermediate), root=",
         skel_root ? String::utf8(skel_root->GetName().c_str()) : String("<null>"));
 
-    // Create explicit Skin with inverse-rest bind poses so skinning gives identity at rest.
-    // Without this, Godot uses identity bind poses, applying bone_global_rest directly to
-    // vertices (bone_global_rest * identity != identity), causing distortion.
-    Ref<Skin> skin_res = skeleton->create_skin_from_rest_transforms();
-    skin_cache[skel_root] = skin_res;
-
-    // --- Diagnostic: compare our computed bind vs NIF skin data bind ---
-    // Our bind = inverse(bone_global_rest). NIF stores per-bone transforms in skin_data.
-    // Print both origins for manual comparison (NIF values need coord swap to compare).
-    for (unsigned int i = 0; i < skin_bone_count; ++i) {
-        NiNodeRef bone = bones[i];
-        if (!bone) continue;
-        auto it = bone_index_map.find(bone);
-        if (it == bone_index_map.end()) continue;
-        int gidx = it->second;
-
-        godot::Transform3D our_bind = skeleton->get_bone_global_rest(gidx).affine_inverse();
-        Niflib::Matrix44 nif_bt = skin_data->GetBoneTransform(i);
-        Niflib::Vector3 nif_t;
-        Niflib::Matrix33 nif_r;
-        float nif_s;
-        nif_bt.Decompose(nif_t, nif_r, nif_s);
-
-        UtilityFunctions::print("[BIND] bone=", skeleton->get_bone_name(gidx),
-            " ours=(", our_bind.origin.x, ",", our_bind.origin.y, ",", our_bind.origin.z, ")",
-            " nif=(", nif_t.x, ",", nif_t.y, ",", nif_t.z, ")",
-            " nif_godot=(", nif_t.x, ",", nif_t.z, ",", -nif_t.y, ")");
+    // Create default Skin from rest transforms (only if Step 3b didn't build a custom one).
+    if (skin_cache.find(skel_root) == skin_cache.end()) {
+        Ref<Skin> skin_res = skeleton->create_skin_from_rest_transforms();
+        skin_cache[skel_root] = skin_res;
     }
 
     return skeleton;
