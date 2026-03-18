@@ -1728,6 +1728,18 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 skin_vertex_transform = godot::Transform3D(basis, nif_to_godot_vec3(gt));
             }
 
+            // DIAGNOSTIC: log geom_local for all skinned meshes
+            {
+                godot::Quaternion svt_quat = skin_vertex_transform.basis.orthonormalized().get_rotation_quaternion();
+                UtilityFunctions::print("[SKINFIX] mesh='",
+                    String::utf8(nif_display_name(StaticCast<NiObject>(geom)).c_str()),
+                    "' geom_local_origin=(", skin_vertex_transform.origin.x,
+                    ",", skin_vertex_transform.origin.y,
+                    ",", skin_vertex_transform.origin.z,
+                    ") geom_local_quat=(", svt_quat.x, ",", svt_quat.y,
+                    ",", svt_quat.z, ",", svt_quat.w, ")");
+            }
+
             std::vector<NiNodeRef> bones = skin->GetBones();
             unsigned int bone_count = skin_data->GetBoneCount();
 
@@ -1805,12 +1817,23 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
             godot::Transform3D skindata_world = nif_matrix44_to_godot(bone_world_nif);
 
             float dist = (ninode_world.origin - skindata_world.origin).length();
-            if (dist > 10.0f) {
+
+            // Also check rotation mismatch (quaternion angle difference).
+            // Some meshes (e.g. bomber body) have matching positions but
+            // different rotations — these need custom skin too.
+            godot::Quaternion q_ninode = ninode_world.basis.orthonormalized().get_rotation_quaternion();
+            godot::Quaternion q_skindata = skindata_world.basis.orthonormalized().get_rotation_quaternion();
+            float rot_dot = std::abs(q_ninode.dot(q_skindata));
+            float rot_angle_deg = rot_dot < 1.0f
+                ? godot::Math::rad_to_deg(2.0f * std::acos(std::min(rot_dot, 1.0f)))
+                : 0.0f;
+
+            if (dist > 10.0f || rot_angle_deg > 5.0f) {
                 needs_custom_skin = true;
                 UtilityFunctions::print("[SKIN] Per-mesh mismatch for '",
                     String::utf8(nif_display_name(StaticCast<NiObject>(geom)).c_str()),
                     "' bone=", skeleton->get_bone_name(it->second),
-                    " dist=", dist);
+                    " dist=", dist, " rot=", rot_angle_deg, "deg");
                 break;
             }
             bones_checked++;
@@ -1839,6 +1862,25 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 Niflib::Matrix44 skin_bind_nif = prefix_nif * overall_nif * bw_nif;
                 godot::Transform3D skin_bind = nif_matrix44_to_godot(skin_bind_nif);
                 per_mesh_skin->set_bind_pose(it->second, skin_bind);
+            }
+
+            // DIAGNOSTIC: log R for first bone of each mismatch mesh
+            for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
+                if (skin_bones[ci] == NULL) continue;
+                auto cit = bone_index_map.find(skin_bones[ci]);
+                if (cit == bone_index_map.end()) continue;
+
+                godot::Transform3D bone_rest = compute_bone_global_rest(skeleton, cit->second);
+                godot::Transform3D custom_bind = per_mesh_skin->get_bind_pose(cit->second);
+                godot::Transform3D R = bone_rest * custom_bind;
+                godot::Quaternion R_quat = R.basis.get_quaternion();
+
+                UtilityFunctions::print("[SKINFIX] mesh='",
+                    String::utf8(nif_display_name(StaticCast<NiObject>(geom)).c_str()),
+                    "' bone='", skeleton->get_bone_name(cit->second),
+                    "' R_origin=(", R.origin.x, ",", R.origin.y, ",", R.origin.z,
+                    ") R_quat=(", R_quat.x, ",", R_quat.y, ",", R_quat.z, ",", R_quat.w, ")");
+                break;
             }
 
             // Compute rotation correction R = bone_rest * custom_bind for first valid bone.
