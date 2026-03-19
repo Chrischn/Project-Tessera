@@ -350,6 +350,17 @@ godot::Transform3D GdextNiflib::compute_bone_global_rest(Skeleton3D* skeleton, i
     return global;
 }
 
+// Computes the NIF world transform of a node by composing local transforms up to root.
+// In NIF row-vector convention: v_world = v_local * node_local * parent_local * ... * root_local
+static Niflib::Matrix44 compute_nif_world_transform(Niflib::NiNodeRef node) {
+    Niflib::Matrix44 world;
+    while (node != NULL) {
+        world = world * node->GetLocalTransform();
+        node = node->GetParent();
+    }
+    return world;
+}
+
 // Populates bone_index_map (NiNode* -> Godot bone index) for weight assignment.
 Skeleton3D* GdextNiflib::build_skeleton(NiSkinInstanceRef skin, NiNodeRef parent_ni_node) {
     if (!skin) return nullptr;
@@ -1305,28 +1316,8 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
             // animated bones.
             reparent_bone_attachments(root_node, godotnode);
 
-            // Deferred rotation correction: apply only when ALL mismatch meshes on
-            // the skeleton agree on R (consistent) AND every skinned mesh was a mismatch.
-            for (auto& [skel_root_ni, skel] : skeleton_cache) {
-                auto rc_it = rotation_correction_cache.find(skel_root_ni);
-                if (rc_it == rotation_correction_cache.end()) continue;
-
-                auto con_it = rotation_correction_consistent.find(skel_root_ni);
-                if (con_it == rotation_correction_consistent.end() || !con_it->second) continue;
-
-                int skinned_mesh_count = 0;
-                for (int ci = 0; ci < skel->get_child_count(); ++ci) {
-                    MeshInstance3D* mi = Object::cast_to<MeshInstance3D>(skel->get_child(ci));
-                    if (mi && mi->get_skin().is_valid()) skinned_mesh_count++;
-                }
-                auto mc_it = rotation_correction_mismatch_count.find(skel_root_ni);
-                int mismatch_count = (mc_it != rotation_correction_mismatch_count.end())
-                                       ? mc_it->second : 0;
-
-                if (mismatch_count == skinned_mesh_count) {
-                    skel->set_transform(rc_it->second);
-                }
-            }
+            // Note: no deferred skeleton correction needed — the relative prefix
+            // computation (parent_world * inv(host_world)) prevents double-counting.
         } else {
             // Edge case: root is a single NiTriShape (rare)
             NiTriShapeRef root_shape = DynamicCast<NiTriShape>(ref_root);
@@ -1350,9 +1341,7 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         bone_index_map.clear();
         skeleton_cache.clear();
         skin_cache.clear();
-        rotation_correction_cache.clear();
-        rotation_correction_consistent.clear();
-        rotation_correction_mismatch_count.clear();
+        skeleton_host_map.clear();
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -1796,14 +1785,16 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
         Niflib::NiSkinDataRef sd = skin->GetSkinData();
         Niflib::Matrix44 overall_nif = sd->GetOverallTransform();
 
-        // Prefix: transform from parent_ni_node up to skel_root, in NIF space.
-        Niflib::Matrix44 prefix_nif;
-        Niflib::NiNodeRef walk_node = parent_ni_node;
-        while (walk_node != NULL && walk_node != skel_root) {
-            // Row-vector: APPEND each ancestor's local transform.
-            prefix_nif = prefix_nif * walk_node->GetLocalTransform();
-            walk_node = walk_node->GetParent();
-        }
+        // Prefix: RELATIVE transform from parent_ni_node's space to skeleton host's space.
+        // The skeleton's Godot Node3D is a child of skeleton_host's Node3D, so
+        // skeleton_global already includes all transforms from root to skeleton_host.
+        // The prefix must only cover the gap between this mesh's parent and the host.
+        // Formula: prefix = parent_world * inv(host_world) in NIF row-vector convention.
+        Niflib::NiNodeRef skeleton_host = skeleton_host_map.count(skel_root)
+            ? skeleton_host_map[StaticCast<NiNode>(skel_root)] : parent_ni_node;
+        Niflib::Matrix44 parent_world_nif = compute_nif_world_transform(parent_ni_node);
+        Niflib::Matrix44 host_world_nif = compute_nif_world_transform(skeleton_host);
+        Niflib::Matrix44 prefix_nif = parent_world_nif * host_world_nif.Inverse();
         Niflib::Matrix44 prefix_nif_inv = prefix_nif.Inverse();
 
         // Compare NiNode-derived rest vs NiSkinData bind for up to 3 skin bones.
@@ -1882,49 +1873,22 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 godot::Transform3D R = bone_rest * custom_bind;
                 godot::Quaternion R_quat = R.basis.orthonormalized().get_quaternion();
 
+                // Log prefix alongside R to detect double-counting
+                godot::Transform3D pfx_godot = nif_matrix44_to_godot(prefix_nif);
+                godot::Quaternion pfx_q = pfx_godot.basis.orthonormalized().get_rotation_quaternion();
+                float pfx_angle = godot::Math::rad_to_deg(pfx_q.get_angle());
+
                 UtilityFunctions::print("[SKINFIX] mesh='",
                     String::utf8(nif_display_name(StaticCast<NiObject>(geom)).c_str()),
                     "' bone='", skeleton->get_bone_name(cit->second),
                     "' R_origin=(", R.origin.x, ",", R.origin.y, ",", R.origin.z,
-                    ") R_quat=(", R_quat.x, ",", R_quat.y, ",", R_quat.z, ",", R_quat.w, ")");
+                    ") R_quat=(", R_quat.x, ",", R_quat.y, ",", R_quat.z, ",", R_quat.w,
+                    ") prefix_origin=(", pfx_godot.origin.x, ",", pfx_godot.origin.y, ",", pfx_godot.origin.z,
+                    ") prefix_angle=", pfx_angle, "deg");
                 break;
             }
 
-            // Compute rotation correction and track consistency across meshes.
-            // Applied in deferred pass only when ALL mismatch meshes agree on R.
-            {
-                godot::Transform3D correction;
-                bool found_bone = false;
-                for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
-                    if (skin_bones[ci] == NULL) continue;
-                    auto cit = bone_index_map.find(skin_bones[ci]);
-                    if (cit == bone_index_map.end()) continue;
-
-                    godot::Transform3D bone_rest = compute_bone_global_rest(skeleton, cit->second);
-                    godot::Transform3D R = bone_rest * per_mesh_skin->get_bind_pose(cit->second);
-                    correction = godot::Transform3D(R.basis.inverse().orthonormalized(), godot::Vector3());
-                    found_bone = true;
-                    break;
-                }
-                if (found_bone) {
-                    rotation_correction_mismatch_count[skel_root]++;
-                    auto rc_it = rotation_correction_cache.find(skel_root);
-                    if (rc_it == rotation_correction_cache.end()) {
-                        rotation_correction_cache[skel_root] = correction;
-                        rotation_correction_consistent[skel_root] = true;
-                    } else if (rotation_correction_consistent[skel_root]) {
-                        godot::Quaternion stored_q = rc_it->second.basis.orthonormalized().get_rotation_quaternion();
-                        godot::Quaternion this_q = correction.basis.orthonormalized().get_rotation_quaternion();
-                        float dot = std::abs(stored_q.dot(this_q));
-                        float angle_deg = dot < 1.0f
-                            ? godot::Math::rad_to_deg(2.0f * std::acos(std::min(dot, 1.0f)))
-                            : 0.0f;
-                        if (angle_deg > 8.0f) {
-                            rotation_correction_consistent[skel_root] = false;
-                        }
-                    }
-                }
-            }
+            // Note: rotation correction removed — relative prefix handles double-counting.
         }
     }
 
@@ -2178,6 +2142,7 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     skeleton = build_skeleton(skin, ni_node);
                     if (skeleton) {
                         skeleton_cache[skel_root] = skeleton;
+                        skeleton_host_map[skel_root] = ni_node;
                         godot_node->add_child(skeleton);
                         if (debug_show_bones) {
                             debug_visualize_skeleton(skeleton);
@@ -2236,6 +2201,7 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     skeleton = build_skeleton(skin, ni_node);
                     if (skeleton) {
                         skeleton_cache[skel_root] = skeleton;
+                        skeleton_host_map[skel_root] = ni_node;
                         godot_node->add_child(skeleton);
                         if (debug_show_bones) {
                             debug_visualize_skeleton(skeleton);

@@ -143,12 +143,9 @@ public:
     // Maps NIF skeleton root NiNode* -> explicit Skin resource (inverse-rest bind poses).
     // Created once per skeleton via create_skin_from_rest_transforms(), shared across shapes.
     std::map<Niflib::NiNode*, godot::Ref<godot::Skin>> skin_cache;
-    // Maps NIF skeleton root -> rotation correction (R^{-1}) from first mismatch mesh.
-    std::map<Niflib::NiNode*, godot::Transform3D> rotation_correction_cache;
-    // Tracks whether all mismatch meshes on a skeleton agree on R (same quaternion).
-    std::map<Niflib::NiNode*, bool> rotation_correction_consistent;
-    // Counts how many meshes triggered mismatch per skeleton.
-    std::map<Niflib::NiNode*, int> rotation_correction_mismatch_count;
+    // Maps NIF skeleton root -> the NiNode whose Godot Node3D hosts the Skeleton3D.
+    // Used to compute the correct relative prefix for each mesh's skin bind.
+    std::map<Niflib::NiNode*, Niflib::NiNode*> skeleton_host_map;
 
     // --- Team color ---
     // Applied at runtime to all meshes that carry a DARK_MAP (slot 1) mask texture.
