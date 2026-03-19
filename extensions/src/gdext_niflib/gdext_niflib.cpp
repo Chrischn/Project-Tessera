@@ -1309,6 +1309,7 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         // New architecture: traverse via scene graph (GetChildren), not GetRefs
         NiNodeRef root_node = DynamicCast<NiNode>(ref_root);
         if (root_node) {
+            nif_root_node = godotnode;  // Store root for skeleton placement
             process_ni_node(root_node, godotnode, base_path);
 
             // Reparent attachment nodes (weapons, props) from static Node3D
@@ -1341,7 +1342,7 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         bone_index_map.clear();
         skeleton_cache.clear();
         skin_cache.clear();
-        skeleton_host_map.clear();
+        nif_root_node = nullptr;
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -1785,16 +1786,15 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
         Niflib::NiSkinDataRef sd = skin->GetSkinData();
         Niflib::Matrix44 overall_nif = sd->GetOverallTransform();
 
-        // Prefix: RELATIVE transform from parent_ni_node's space to skeleton host's space.
-        // The skeleton's Godot Node3D is a child of skeleton_host's Node3D, so
-        // skeleton_global already includes all transforms from root to skeleton_host.
-        // The prefix must only cover the gap between this mesh's parent and the host.
-        // Formula: prefix = parent_world * inv(host_world) in NIF row-vector convention.
-        Niflib::NiNodeRef skeleton_host = skeleton_host_map.count(skel_root)
-            ? skeleton_host_map[StaticCast<NiNode>(skel_root)] : parent_ni_node;
-        Niflib::Matrix44 parent_world_nif = compute_nif_world_transform(parent_ni_node);
-        Niflib::Matrix44 host_world_nif = compute_nif_world_transform(skeleton_host);
-        Niflib::Matrix44 prefix_nif = parent_world_nif * host_world_nif.Inverse();
+        // Prefix: transform from parent_ni_node up to skel_root, in NIF space.
+        // The skeleton is placed under nif_root_node (scene root), so skeleton_global
+        // is ~identity. The prefix in the skin bind provides ALL needed transforms.
+        Niflib::Matrix44 prefix_nif;
+        Niflib::NiNodeRef walk_node = parent_ni_node;
+        while (walk_node != NULL && walk_node != skel_root) {
+            prefix_nif = prefix_nif * walk_node->GetLocalTransform();
+            walk_node = walk_node->GetParent();
+        }
         Niflib::Matrix44 prefix_nif_inv = prefix_nif.Inverse();
 
         // Compare NiNode-derived rest vs NiSkinData bind for up to 3 skin bones.
@@ -2142,8 +2142,7 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     skeleton = build_skeleton(skin, ni_node);
                     if (skeleton) {
                         skeleton_cache[skel_root] = skeleton;
-                        skeleton_host_map[skel_root] = ni_node;
-                        godot_node->add_child(skeleton);
+                        nif_root_node->add_child(skeleton);
                         if (debug_show_bones) {
                             debug_visualize_skeleton(skeleton);
                         }
@@ -2201,8 +2200,7 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     skeleton = build_skeleton(skin, ni_node);
                     if (skeleton) {
                         skeleton_cache[skel_root] = skeleton;
-                        skeleton_host_map[skel_root] = ni_node;
-                        godot_node->add_child(skeleton);
+                        nif_root_node->add_child(skeleton);
                         if (debug_show_bones) {
                             debug_visualize_skeleton(skeleton);
                         }
