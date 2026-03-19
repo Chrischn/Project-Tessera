@@ -350,15 +350,25 @@ godot::Transform3D GdextNiflib::compute_bone_global_rest(Skeleton3D* skeleton, i
     return global;
 }
 
-// Computes the NIF world transform of a node by composing local transforms up to root.
-// In NIF row-vector convention: v_world = v_local * node_local * parent_local * ... * root_local
-static Niflib::Matrix44 compute_nif_world_transform(Niflib::NiNodeRef node) {
-    Niflib::Matrix44 world;
-    while (node != NULL) {
-        world = world * node->GetLocalTransform();
-        node = node->GetParent();
+// Checks if 'node' is a descendant of 'potential_ancestor' in the NIF hierarchy.
+static bool is_nif_descendant(Niflib::NiNodeRef node, Niflib::NiNodeRef potential_ancestor) {
+    Niflib::NiNodeRef walk = node;
+    while (walk != NULL) {
+        if (walk == potential_ancestor) return true;
+        walk = walk->GetParent();
     }
-    return world;
+    return false;
+}
+
+// Finds the lowest common ancestor of two NiNodes by collecting ancestors of 'a'
+// then walking 'b' upward until a match is found.
+static Niflib::NiNodeRef find_common_ancestor(Niflib::NiNodeRef a, Niflib::NiNodeRef b) {
+    std::set<Niflib::NiNode*> ancestors_a;
+    for (Niflib::NiNodeRef w = a; w != NULL; w = w->GetParent())
+        ancestors_a.insert(w);
+    for (Niflib::NiNodeRef w = b; w != NULL; w = w->GetParent())
+        if (ancestors_a.count(w)) return w;
+    return NULL;
 }
 
 // Populates bone_index_map (NiNode* -> Godot bone index) for weight assignment.
@@ -1309,7 +1319,6 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         // New architecture: traverse via scene graph (GetChildren), not GetRefs
         NiNodeRef root_node = DynamicCast<NiNode>(ref_root);
         if (root_node) {
-            nif_root_node = godotnode;  // Store root for skeleton placement
             process_ni_node(root_node, godotnode, base_path);
 
             // Reparent attachment nodes (weapons, props) from static Node3D
@@ -1317,8 +1326,24 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
             // animated bones.
             reparent_bone_attachments(root_node, godotnode);
 
-            // Note: no deferred skeleton correction needed — the relative prefix
-            // computation (parent_world * inv(host_world)) prevents double-counting.
+            // Deferred rotation correction: apply only when ALL mismatch meshes
+            // agree on R AND every skinned mesh triggered mismatch.
+            for (auto& [skel_root_ni, skel] : skeleton_cache) {
+                auto rc_it = rotation_correction_cache.find(skel_root_ni);
+                if (rc_it == rotation_correction_cache.end()) continue;
+                auto con_it = rotation_correction_consistent.find(skel_root_ni);
+                if (con_it == rotation_correction_consistent.end() || !con_it->second) continue;
+                int skinned_mesh_count = 0;
+                for (int ci = 0; ci < skel->get_child_count(); ++ci) {
+                    MeshInstance3D* mi = Object::cast_to<MeshInstance3D>(skel->get_child(ci));
+                    if (mi && mi->get_skin().is_valid()) skinned_mesh_count++;
+                }
+                auto mc_it = rotation_correction_mismatch_count.find(skel_root_ni);
+                int mismatch_count = (mc_it != rotation_correction_mismatch_count.end()) ? mc_it->second : 0;
+                if (mismatch_count == skinned_mesh_count) {
+                    skel->set_transform(rc_it->second);
+                }
+            }
         } else {
             // Edge case: root is a single NiTriShape (rare)
             NiTriShapeRef root_shape = DynamicCast<NiTriShape>(ref_root);
@@ -1342,7 +1367,11 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         bone_index_map.clear();
         skeleton_cache.clear();
         skin_cache.clear();
-        nif_root_node = nullptr;
+        rotation_correction_cache.clear();
+        rotation_correction_consistent.clear();
+        rotation_correction_mismatch_count.clear();
+        skeleton_host_map.clear();
+        ni_to_godot_node.clear();
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -1786,9 +1815,9 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
         Niflib::NiSkinDataRef sd = skin->GetSkinData();
         Niflib::Matrix44 overall_nif = sd->GetOverallTransform();
 
-        // Prefix: transform from parent_ni_node up to skel_root, in NIF space.
-        // The skeleton is placed under nif_root_node (scene root), so skeleton_global
-        // is ~identity. The prefix in the skin bind provides ALL needed transforms.
+        // Prefix: transform from parent_ni_node up to skel_root (exclusive), in NIF space.
+        // Skeleton is under the first mesh's parent Node3D (godot_node), so prefix
+        // covers transforms from this mesh's parent up to skel_root.
         Niflib::Matrix44 prefix_nif;
         Niflib::NiNodeRef walk_node = parent_ni_node;
         while (walk_node != NULL && walk_node != skel_root) {
@@ -1888,7 +1917,39 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 break;
             }
 
-            // Note: rotation correction removed — relative prefix handles double-counting.
+            // Track rotation correction with consistency check across meshes.
+            {
+                godot::Transform3D correction;
+                bool found_bone = false;
+                for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
+                    if (skin_bones[ci] == NULL) continue;
+                    auto cit = bone_index_map.find(skin_bones[ci]);
+                    if (cit == bone_index_map.end()) continue;
+                    godot::Transform3D bone_rest = compute_bone_global_rest(skeleton, cit->second);
+                    godot::Transform3D R = bone_rest * per_mesh_skin->get_bind_pose(cit->second);
+                    correction = godot::Transform3D(R.basis.inverse().orthonormalized(), godot::Vector3());
+                    found_bone = true;
+                    break;
+                }
+                if (found_bone) {
+                    rotation_correction_mismatch_count[skel_root]++;
+                    auto rc_it = rotation_correction_cache.find(skel_root);
+                    if (rc_it == rotation_correction_cache.end()) {
+                        rotation_correction_cache[skel_root] = correction;
+                        rotation_correction_consistent[skel_root] = true;
+                    } else if (rotation_correction_consistent[skel_root]) {
+                        godot::Quaternion stored_q = rc_it->second.basis.orthonormalized().get_rotation_quaternion();
+                        godot::Quaternion this_q = correction.basis.orthonormalized().get_rotation_quaternion();
+                        float dot = std::abs(stored_q.dot(this_q));
+                        float angle_deg = dot < 1.0f
+                            ? godot::Math::rad_to_deg(2.0f * std::acos(std::min(dot, 1.0f)))
+                            : 0.0f;
+                        if (angle_deg > 8.0f) {
+                            rotation_correction_consistent[skel_root] = false;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -2095,6 +2156,7 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
     // Apply NIF transform
     apply_nif_transform(StaticCast<NiAVObject>(ni_node), godot_node);
     parent_godot->add_child(godot_node);
+    ni_to_godot_node[ni_node] = godot_node;  // Track for skeleton re-parenting
 
     // Iterate scene graph children only
     std::vector<NiAVObjectRef> children = ni_node->GetChildren();
@@ -2117,6 +2179,25 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                 auto cache_it = skeleton_cache.find(skel_root);
                 if (cache_it != skeleton_cache.end()) {
                     skeleton = cache_it->second;
+
+                    // Re-parent skeleton to common ancestor if this mesh is on a
+                    // different branch than the skeleton's current host (sibling fix).
+                    auto host_it = skeleton_host_map.find(skel_root);
+                    if (host_it != skeleton_host_map.end()) {
+                        Niflib::NiNodeRef current_host = host_it->second;
+                        if (ni_node != current_host && !is_nif_descendant(ni_node, current_host)) {
+                            Niflib::NiNodeRef common = find_common_ancestor(ni_node, current_host);
+                            if (common != NULL) {
+                                auto ca_it = ni_to_godot_node.find(common);
+                                if (ca_it != ni_to_godot_node.end() && ca_it->second != skeleton->get_parent()) {
+                                    skeleton->get_parent()->remove_child(skeleton);
+                                    ca_it->second->add_child(skeleton);
+                                    skeleton_host_map[skel_root] = common;
+                                }
+                            }
+                        }
+                    }
+
                     // Rebuild bone_index_map for this shape's bone set from the cached skeleton.
                     // The cached skeleton was built for a previous shape; its bone_index_map may
                     // be stale if this shape references different bone nodes.
@@ -2142,7 +2223,8 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     skeleton = build_skeleton(skin, ni_node);
                     if (skeleton) {
                         skeleton_cache[skel_root] = skeleton;
-                        nif_root_node->add_child(skeleton);
+                        skeleton_host_map[skel_root] = ni_node;
+                        godot_node->add_child(skeleton);
                         if (debug_show_bones) {
                             debug_visualize_skeleton(skeleton);
                         }
@@ -2177,6 +2259,24 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                 auto cache_it = skeleton_cache.find(skel_root);
                 if (cache_it != skeleton_cache.end()) {
                     skeleton = cache_it->second;
+
+                    // Re-parent skeleton to common ancestor if sibling branch detected.
+                    auto host_it = skeleton_host_map.find(skel_root);
+                    if (host_it != skeleton_host_map.end()) {
+                        Niflib::NiNodeRef current_host = host_it->second;
+                        if (ni_node != current_host && !is_nif_descendant(ni_node, current_host)) {
+                            Niflib::NiNodeRef common = find_common_ancestor(ni_node, current_host);
+                            if (common != NULL) {
+                                auto ca_it = ni_to_godot_node.find(common);
+                                if (ca_it != ni_to_godot_node.end() && ca_it->second != skeleton->get_parent()) {
+                                    skeleton->get_parent()->remove_child(skeleton);
+                                    ca_it->second->add_child(skeleton);
+                                    skeleton_host_map[skel_root] = common;
+                                }
+                            }
+                        }
+                    }
+
                     // Rebuild bone_index_map for this shape's bone set from the cached skeleton.
                     bone_index_map.clear();
                     bool has_missing = false;
@@ -2200,7 +2300,8 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                     skeleton = build_skeleton(skin, ni_node);
                     if (skeleton) {
                         skeleton_cache[skel_root] = skeleton;
-                        nif_root_node->add_child(skeleton);
+                        skeleton_host_map[skel_root] = ni_node;
+                        godot_node->add_child(skeleton);
                         if (debug_show_bones) {
                             debug_visualize_skeleton(skeleton);
                         }
