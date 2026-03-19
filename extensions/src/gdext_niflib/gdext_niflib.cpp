@@ -1305,20 +1305,25 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
             // animated bones.
             reparent_bone_attachments(root_node, godotnode);
 
-            // Deferred rotation correction: apply for single-mesh mismatch skeletons.
-            // For multi-mesh skeletons the correction differs per mesh and can't be
-            // applied globally to the skeleton, so it is skipped.
+            // Deferred rotation correction: apply only when ALL mismatch meshes on
+            // the skeleton agree on R (consistent) AND every skinned mesh was a mismatch.
             for (auto& [skel_root_ni, skel] : skeleton_cache) {
                 auto rc_it = rotation_correction_cache.find(skel_root_ni);
                 if (rc_it == rotation_correction_cache.end()) continue;
+
+                auto con_it = rotation_correction_consistent.find(skel_root_ni);
+                if (con_it == rotation_correction_consistent.end() || !con_it->second) continue;
 
                 int skinned_mesh_count = 0;
                 for (int ci = 0; ci < skel->get_child_count(); ++ci) {
                     MeshInstance3D* mi = Object::cast_to<MeshInstance3D>(skel->get_child(ci));
                     if (mi && mi->get_skin().is_valid()) skinned_mesh_count++;
                 }
+                auto mc_it = rotation_correction_mismatch_count.find(skel_root_ni);
+                int mismatch_count = (mc_it != rotation_correction_mismatch_count.end())
+                                       ? mc_it->second : 0;
 
-                if (skinned_mesh_count == 1) {
+                if (mismatch_count == skinned_mesh_count) {
                     skel->set_transform(rc_it->second);
                 }
             }
@@ -1346,6 +1351,8 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         skeleton_cache.clear();
         skin_cache.clear();
         rotation_correction_cache.clear();
+        rotation_correction_consistent.clear();
+        rotation_correction_mismatch_count.clear();
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -1873,7 +1880,7 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 godot::Transform3D bone_rest = compute_bone_global_rest(skeleton, cit->second);
                 godot::Transform3D custom_bind = per_mesh_skin->get_bind_pose(cit->second);
                 godot::Transform3D R = bone_rest * custom_bind;
-                godot::Quaternion R_quat = R.basis.get_quaternion();
+                godot::Quaternion R_quat = R.basis.orthonormalized().get_quaternion();
 
                 UtilityFunctions::print("[SKINFIX] mesh='",
                     String::utf8(nif_display_name(StaticCast<NiObject>(geom)).c_str()),
@@ -1883,9 +1890,11 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 break;
             }
 
-            // Compute rotation correction R = bone_rest * custom_bind for first valid bone.
-            // Stored for deferred application to single-mesh skeletons in load_nif_scene.
-            if (rotation_correction_cache.find(skel_root) == rotation_correction_cache.end()) {
+            // Compute rotation correction and track consistency across meshes.
+            // Applied in deferred pass only when ALL mismatch meshes agree on R.
+            {
+                godot::Transform3D correction;
+                bool found_bone = false;
                 for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
                     if (skin_bones[ci] == NULL) continue;
                     auto cit = bone_index_map.find(skin_bones[ci]);
@@ -1893,8 +1902,27 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
 
                     godot::Transform3D bone_rest = compute_bone_global_rest(skeleton, cit->second);
                     godot::Transform3D R = bone_rest * per_mesh_skin->get_bind_pose(cit->second);
-                    rotation_correction_cache[skel_root] = godot::Transform3D(R.basis.inverse(), godot::Vector3());
+                    correction = godot::Transform3D(R.basis.inverse().orthonormalized(), godot::Vector3());
+                    found_bone = true;
                     break;
+                }
+                if (found_bone) {
+                    rotation_correction_mismatch_count[skel_root]++;
+                    auto rc_it = rotation_correction_cache.find(skel_root);
+                    if (rc_it == rotation_correction_cache.end()) {
+                        rotation_correction_cache[skel_root] = correction;
+                        rotation_correction_consistent[skel_root] = true;
+                    } else if (rotation_correction_consistent[skel_root]) {
+                        godot::Quaternion stored_q = rc_it->second.basis.orthonormalized().get_rotation_quaternion();
+                        godot::Quaternion this_q = correction.basis.orthonormalized().get_rotation_quaternion();
+                        float dot = std::abs(stored_q.dot(this_q));
+                        float angle_deg = dot < 1.0f
+                            ? godot::Math::rad_to_deg(2.0f * std::acos(std::min(dot, 1.0f)))
+                            : 0.0f;
+                        if (angle_deg > 8.0f) {
+                            rotation_correction_consistent[skel_root] = false;
+                        }
+                    }
                 }
             }
         }
