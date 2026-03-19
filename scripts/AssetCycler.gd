@@ -56,6 +56,14 @@ var _auto_cycle_active := false
 var _auto_cycle_index := 0
 var _auto_cycle_start_log_lines := 0
 
+# Diagnostic subset cycle (press F6) — cycle through specific units for analysis
+var _diag_targets: Array[String] = [
+	"bear.nif", "cannon.nif", "cavalry.nif", "chariot.nif",
+	"caravel.nif", "bomber.nif", "fighter.nif",
+	"horsearcher.nif", "crossbowman.nif", "greatmerchantancient.nif",
+]
+var _diag_cycle_index := 0
+
 
 func setup(base_path: String) -> void:
 	_setup_debug_hud()
@@ -79,6 +87,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	# F5 always works (start/stop auto-cycle)
 	if event.keycode == KEY_F5:
 		_toggle_auto_cycle()
+		return
+	# F6: cycle through diagnostic target units
+	if event.keycode == KEY_F6:
+		_cycle_diag_target()
 		return
 	# Block all other keys during auto-cycle
 	if _auto_cycle_active:
@@ -440,6 +452,28 @@ func _count_log_errors_after(start_line: int) -> int:
 	return errors
 
 
+# --- Diagnostic subset cycle (F6) ---
+
+func _cycle_diag_target() -> void:
+	if _diag_targets.is_empty() or _asset_paths.is_empty():
+		return
+	var target_name := _diag_targets[_diag_cycle_index]
+	_diag_cycle_index = (_diag_cycle_index + 1) % _diag_targets.size()
+	# Find matching asset path
+	for i in _asset_paths.size():
+		if _asset_paths[i].get_file().to_lower() == target_name.to_lower():
+			if _asset_container:
+				_spawn_position = _asset_container.position
+				_asset_container.free()
+				_asset_container = null
+			_current_index = i
+			_load_asset(i)
+			return
+	print("AssetCycler [DIAG]: '%s' not found in VFS" % target_name)
+	# Skip to next target
+	_cycle_diag_target()
+
+
 # --- Grid overlay ---
 
 const GRID_HALF_EXTENT := 1000  # metres; 2km x 2km total, 1m cells
@@ -518,6 +552,7 @@ func _setup_debug_hud() -> void:
 		"I         Cycle debug mode\n" + \
 		"T        Material override\n" + \
 		"F5       Auto-cycle all assets\n" + \
+		"F6       Cycle diagnostic units\n" + \
 		"WASD  Move   Shift  Sprint\n" + \
 		"Mouse  Look\n" + \
 		"Space / Ctrl  Up / Down\n" + \
