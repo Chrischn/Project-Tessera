@@ -33,6 +33,7 @@
 #include <obj/NiBoolInterpolator.h>
 #include <obj/NiBoolData.h>
 #include <obj/NiSourceTexture.h>
+#include <obj/NiUVData.h>
 #include <gen/enums.h>
 
 #include <godot_cpp/classes/animation.hpp>
@@ -68,20 +69,17 @@ void GdextNiflib::process_scene_controllers(NiObjectNETRef obj, Node3D* godot_no
         }
 
         // --- Collect controllers for deferred animation building ---
-        // These 5 types are handled by build_scene_animations() after the
+        // These 6 types are handled by build_scene_animations() after the
         // full scene tree is built. Remaining types stay as stubs.
         if (DynamicCast<NiTextureTransformController>(ctrl) != NULL ||
             DynamicCast<NiFlipController>(ctrl) != NULL ||
             DynamicCast<NiAlphaController>(ctrl) != NULL ||
             DynamicCast<NiMaterialColorController>(ctrl) != NULL ||
-            DynamicCast<NiVisController>(ctrl) != NULL) {
+            DynamicCast<NiVisController>(ctrl) != NULL ||
+            DynamicCast<NiUVController>(ctrl) != NULL) {
             pending_scene_controllers.push_back({ctrl, obj, godot_node});
             UtilityFunctions::print("[CTRL] Collected ", String::utf8(type_name.c_str()),
                 " on '", String::utf8(nif_display_name(StaticCast<NiObject>(obj)).c_str()), "'");
-        }
-        else if (DynamicCast<NiUVController>(ctrl) != NULL) {
-            UtilityFunctions::print("[STUB] NiUVController on '",
-                String::utf8(nif_display_name(StaticCast<NiObject>(obj)).c_str()), "'");
         }
         else if (DynamicCast<NiGeomMorpherController>(ctrl) != NULL) {
             UtilityFunctions::print("[STUB] NiGeomMorpherController on '",
@@ -413,6 +411,58 @@ void GdextNiflib::build_scene_animations(const String& base_path, Node3D* root_g
             UtilityFunctions::print("[CTRL] NiMaterialColorController: target=", (int)target,
                 " ", (int)keys.size(), " keys -> ", track_path);
         }
+        // --- NiUVController ---
+        // Legacy UV animation with 4 key groups: U offset, V offset, U tiling, V tiling.
+        // Maps to StandardMaterial3D uv1_offset and uv1_scale properties.
+        else if (auto uvc = DynamicCast<NiUVController>(ctrl)) {
+            if (!mesh_instance || mesh_path.is_empty()) {
+                UtilityFunctions::push_warning("[CTRL] NiUVController: no MeshInstance3D found");
+                continue;
+            }
+            if (is_shader_material) {
+                UtilityFunctions::push_warning("[CTRL] NiUVController: ShaderMaterial not supported, skipping");
+                continue;
+            }
+
+            NiUVDataRef uv_data = uvc->GetData();
+            if (!uv_data) {
+                UtilityFunctions::push_warning("[CTRL] NiUVController: no UV data");
+                continue;
+            }
+
+            const auto& groups = uv_data->GetUvGroups();
+            // Group indices: [0]=U offset, [1]=V offset, [2]=U tiling, [3]=V tiling
+            struct UvTrackInfo {
+                int group_idx;
+                const char* prop_suffix;
+                const char* label;
+            };
+            UvTrackInfo uv_tracks[] = {
+                {0, ":uv1_offset:x", "U_offset"},
+                {1, ":uv1_offset:y", "V_offset"},
+                {2, ":uv1_scale:x",  "U_tiling"},
+                {3, ":uv1_scale:y",  "V_tiling"},
+            };
+
+            int total_keys = 0;
+            for (const auto& info : uv_tracks) {
+                const auto& key_list = groups[info.group_idx].keys;
+                if (key_list.empty()) continue;
+
+                String track_path = mesh_path + ":surface_material_override/0" + info.prop_suffix;
+                int track = anim->add_track(Animation::TYPE_VALUE);
+                anim->track_set_path(track, NodePath(track_path));
+                anim->value_track_set_update_mode(track, Animation::UPDATE_CONTINUOUS);
+
+                for (const auto& k : key_list) {
+                    anim->track_insert_key(track, k.time - start_time, k.data);
+                }
+                total_keys += (int)key_list.size();
+            }
+
+            UtilityFunctions::print("[CTRL] NiUVController: ", total_keys,
+                " keys across 4 groups -> ", mesh_path);
+        }
         // --- NiVisController ---
         // Toggles node visibility at keyframed times (blinking lights, phased effects).
         // Maps to Node3D visible property via discrete boolean keys.
@@ -435,7 +485,10 @@ void GdextNiflib::build_scene_animations(const String& base_path, Node3D* root_g
                 }
             }
             if (keys.empty()) {
-                UtilityFunctions::push_warning("[CTRL] NiVisController: no vis data (legacy or interpolator)");
+                // Expected: visibility often controlled by KFM animation system, not inline data
+                UtilityFunctions::print("[CTRL] NiVisController: no inline vis data on '",
+                    String::utf8(nif_display_name(StaticCast<NiObject>(pc.target_object)).c_str()),
+                    "' (likely driven by .kf animation)");
                 continue;
             }
 
