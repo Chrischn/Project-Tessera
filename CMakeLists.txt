@@ -41,7 +41,8 @@ set_target_properties(niflib niflib_static PROPERTIES
 # GDExtension DLL: niflib_gdext
 # =============================================================================
 file(GLOB_RECURSE EXT_SOURCES
-    "${CMAKE_SOURCE_DIR}/extensions/src/*.cpp"
+    "${CMAKE_SOURCE_DIR}/extensions/gdext_niflib/*.cpp"
+    "${CMAKE_SOURCE_DIR}/extensions/gdext_niflib/subsystems/*.cpp"
 )
 
 add_library(niflib_gdext SHARED ${EXT_SOURCES})
@@ -52,7 +53,8 @@ target_link_libraries(niflib_gdext PRIVATE
 )
 
 target_include_directories(niflib_gdext PRIVATE
-    "${CMAKE_SOURCE_DIR}/extensions/src"
+    "${CMAKE_SOURCE_DIR}/extensions/gdext_niflib"
+    "${CMAKE_SOURCE_DIR}/extensions/gdext_niflib/subsystems"
     "${CMAKE_SOURCE_DIR}/external/niflib/include"
 )
 

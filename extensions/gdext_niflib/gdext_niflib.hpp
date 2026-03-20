@@ -1,11 +1,16 @@
 #pragma once
 // =============================================================================
-// gdext_niflib.hpp
-// GDExtension class declaration for NIF -> Godot scene translation.
+// File:              gdext_niflib.hpp
+// Author(s):         Chrischn89
+// Godot Version:     4.5
+// Description:
+//   GDExtension class declaration for NIF -> Godot scene translation.
+//   GdextNiflib is a RefCounted GDExtension class. One instance is created per
+//   NIF load call. It holds all per-NIF state (caches, maps) that is populated
+//   during load and cleared at the end of load_nif_scene().
 //
-// GdextNiflib is a RefCounted GDExtension class. One instance is created per
-// NIF load call. It holds all per-NIF state (caches, maps) that is populated
-// during load and cleared at the end of load_nif_scene().
+// License:
+//   Released under the terms of the GNU General Public License version 3.0
 // =============================================================================
 
 //niflib Headers
@@ -16,8 +21,15 @@
 #include <obj/NiTriStrips.h>
 #include <obj/NiTriBasedGeom.h>
 #include <obj/NiTriBasedGeomData.h>
+#include <obj/NiLines.h>
 #include <obj/NiAVObject.h>
+#include <obj/NiBillboardNode.h>
+#include <obj/NiLODNode.h>
+#include <obj/NiSwitchNode.h>
+#include <obj/NiParticles.h>
+#include <obj/NiLight.h>
 #include <obj/NiProperty.h>
+#include <obj/NiTimeController.h>
 #include <obj/NiSkinInstance.h>
 #include <obj/NiSkinData.h>
 #include <obj/NiSkinPartition.h>
@@ -93,8 +105,42 @@ public:
     // Builds a MeshInstance3D from a NiTriStrips (triangle strip, converted to triangles).
     Node3D* process_ni_tri_strips(Niflib::NiTriStripsRef tri_strips, const String& base_path,
         Skeleton3D* skeleton = nullptr, Niflib::NiNodeRef parent_ni_node = Niflib::NiNodeRef());
+    // NiLines stub
+    Node3D* process_ni_lines(Niflib::NiLinesRef lines, const String& base_path);
     // Applies NIF local transform (translation/rotation/scale) to a Godot Node3D.
     void apply_nif_transform(Niflib::NiAVObjectRef av_obj, Node3D* godot_node);
+
+    // --- Scene graph node handlers ---
+    void process_ni_billboard_node(Niflib::NiBillboardNodeRef billboard, Node3D* parent_godot, const String& base_path);
+    void process_ni_lod_node(Niflib::NiLODNodeRef lod_node, Node3D* parent_godot, const String& base_path);
+    void process_ni_switch_node(Niflib::NiSwitchNodeRef switch_node, Node3D* parent_godot, const String& base_path);
+
+    // --- Particle stub ---
+    void process_ni_particle_system(Niflib::NiParticlesRef particles, Node3D* parent_godot, const String& base_path);
+
+    // --- Light stub ---
+    void process_ni_light(Niflib::NiLightRef light, Node3D* parent_godot);
+
+    // --- Extra data, controllers, collision ---
+    void process_extra_data(Niflib::NiObjectNETRef obj, Node3D* godot_node);
+    void process_scene_controllers(Niflib::NiObjectNETRef obj, Node3D* godot_node);
+    void process_ni_collision(Niflib::NiAVObjectRef obj, Node3D* godot_node);
+
+    // --- Scene controller animation ---
+    struct PendingController {
+        Niflib::NiTimeControllerRef controller;
+        Niflib::NiObjectNETRef target_object;
+        Node3D* godot_node;
+    };
+    std::vector<PendingController> pending_scene_controllers;
+    void build_scene_animations(const String& base_path, Node3D* root_godot_node);
+
+    // Shared utility: computes NodePath from root to target node
+    static String get_relative_node_path(Node3D* root, Node3D* target);
+
+    // --- Skinned geometry helper (deduplicates NiTriShape/NiTriStrips skeleton cache code) ---
+    void process_skinned_geometry(Niflib::NiTriBasedGeomRef geom, Niflib::NiNodeRef ni_node,
+        Node3D* godot_node, const String& base_path, bool is_tri_shape);
     // Builds a StandardMaterial3D from a NIF property list.
     godot::Ref<godot::Material> create_material_from_properties(
         const std::vector<Niflib::Ref<Niflib::NiProperty>>& properties,
@@ -114,6 +160,10 @@ public:
     godot::Transform3D compute_bone_global_rest(Skeleton3D* skeleton, int bone_idx);
     // Converts a NIF Matrix44 (world transform) to a Godot Transform3D with coord conversion.
     godot::Transform3D nif_matrix44_to_godot(const Niflib::Matrix44& mat);
+
+    // NIF hierarchy helpers (used by skinning and scene graph)
+    static bool is_nif_descendant(Niflib::NiNodeRef node, Niflib::NiNodeRef potential_ancestor);
+    static Niflib::NiNodeRef find_common_ancestor(Niflib::NiNodeRef a, Niflib::NiNodeRef b);
 
     // --- Bone attachment reparenting ---
     // After process_ni_node builds the Node3D tree, attachment nodes (weapons, props)
