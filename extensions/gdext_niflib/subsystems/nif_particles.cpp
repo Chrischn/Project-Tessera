@@ -3,65 +3,29 @@
 // Author(s):         Chrischn89
 // Godot Version:     4.5
 // Description:
-//   Particle system stub with NiPSys type documentation
+//   NIF particle system placeholder. Creates a billboard sprite at the particle
+//   system's position using the first texture from its properties. Full particle
+//   simulation (GPUParticles3D) is deferred to a future milestone.
 //
 // License:
 //   Released under the terms of the GNU General Public License version 3.0
 // =============================================================================
 #include "gdext_niflib.hpp"
+#include "nif_coordinate.hpp"
 
 #include <obj/NiParticles.h>
 #include <obj/NiParticleSystem.h>
+#include <obj/NiTexturingProperty.h>
+#include <obj/NiSourceTexture.h>
+#include <obj/NiProperty.h>
 
 #include <godot_cpp/variant/utility_functions.hpp>
+#include <godot_cpp/classes/sprite3d.hpp>
+#include <godot_cpp/classes/standard_material3d.hpp>
 
 using namespace godot;
 using namespace Niflib;
 
-// =============================================================================
-// NiParticleSystem / NiParticles stub
-// =============================================================================
-// Civ4 uses particles extensively for fire, smoke, spell effects, explosions,
-// weather, and unit death animations. The NIF particle system maps to Godot's
-// GPUParticles3D with ParticleProcessMaterial.
-//
-// NiPSys* modifier/emitter/controller types and their Godot equivalents:
-//   NiPSysGravityModifier      -> GPUParticlesAttractorBox3D
-//   NiPSysGrowFadeModifier     -> scale curve in ParticleProcessMaterial
-//   NiPSysColorModifier        -> color_ramp in ParticleProcessMaterial
-//   NiPSysRotationModifier     -> angular_velocity in ParticleProcessMaterial
-//   NiPSysBoundUpdateModifier  -> automatic in Godot (visibility_aabb)
-//   NiPSysAgeDeathModifier     -> lifetime in ParticleProcessMaterial
-//   NiPSysSphereEmitter        -> EMISSION_SHAPE_SPHERE
-//   NiPSysCylinderEmitter      -> custom emission shape
-//   NiPSysBoxEmitter           -> EMISSION_SHAPE_BOX
-//   NiPSysMeshEmitter          -> EMISSION_SHAPE_POINTS with mesh vertices
-//   NiPSysColliderManager      -> GPUParticlesCollision*3D nodes
-//   NiPSysPlanarCollider       -> GPUParticlesCollisionHeightField3D
-//   NiPSysSphericalCollider    -> GPUParticlesCollisionSphere3D
-//   NiPSysSpawnModifier        -> sub_emitter in ParticleProcessMaterial
-//   NiPSysDragModifier         -> damping in ParticleProcessMaterial
-//   NiPSysBombModifier         -> GPUParticlesAttractor*3D with impulse
-//   NiPSysTrailEmitter         -> trail mesh or Ribbon3D
-//   NiPSysUpdateCtlr           -> automatic in Godot (process callback)
-//   NiPSysEmitterCtlr          -> emitting property toggle
-//   NiPSysModifierActiveCtlr   -> modifier enable/disable
-//   NiPSysEmitterLifeSpanCtlr  -> AnimationPlayer lifetime track
-//   NiPSysEmitterSpeedCtlr     -> AnimationPlayer initial_velocity track
-//   NiPSysEmitterDeclinationCtlr    -> AnimationPlayer spread track
-//   NiPSysEmitterDeclinationVarCtlr -> AnimationPlayer spread variance track
-//   NiPSysEmitterPlanarAngleCtlr    -> AnimationPlayer flatness track
-//   NiPSysEmitterPlanarAngleVarCtlr -> AnimationPlayer flatness variance track
-//   NiPSysEmitterInitialRadiusCtlr  -> AnimationPlayer emission radius track
-//   NiPSysInitialRotSpeedCtlr       -> AnimationPlayer angular_velocity track
-//   NiPSysInitialRotSpeedVarCtlr    -> AnimationPlayer angular_velocity variance track
-//   NiPSysInitialRotAngleCtlr       -> AnimationPlayer initial angle track
-//   NiPSysInitialRotAngleVarCtlr    -> AnimationPlayer initial angle variance track
-//   NiPSysGravityStrengthCtlr       -> AnimationPlayer attractor strength track
-//   NiPSysFieldAttenuationCtlr      -> AnimationPlayer field attenuation track
-//   NiPSysFieldMagnitudeCtlr        -> AnimationPlayer field magnitude track
-//   NiPSysFieldMaxDistanceCtlr      -> AnimationPlayer field distance track
-// =============================================================================
 void GdextNiflib::process_ni_particle_system(NiParticlesRef particles,
     Node3D* parent, const String& base_path) {
     if (!particles || !parent) return;
@@ -69,7 +33,55 @@ void GdextNiflib::process_ni_particle_system(NiParticlesRef particles,
     std::string name = nif_display_name(StaticCast<NiObject>(particles));
     std::string type = particles->GetType().GetTypeName();
 
-    UtilityFunctions::print("[STUB] ", String::utf8(type.c_str()),
-        " skipped: '", String::utf8(name.c_str()),
-        "' — Godot equivalent: GPUParticles3D + ParticleProcessMaterial");
+    // Try to find a texture from the particle's NiTexturingProperty
+    Ref<ImageTexture> tex;
+    auto properties = particles->GetProperties();
+    for (const auto& prop : properties) {
+        if (prop == NULL) continue;
+        auto tex_prop = DynamicCast<NiTexturingProperty>(prop);
+        if (!tex_prop) continue;
+        // Try BASE_MAP (slot 0) first, then DECAL_0 (slot 8)
+        int slots[] = {0, 8};
+        for (int slot : slots) {
+            if (!tex_prop->HasTexture(slot)) continue;
+            TexDesc td = tex_prop->GetTexture(slot);
+            if (td.source != NULL && td.source->IsTextureExternal()) {
+                tex = load_dds_texture(base_path, td.source->GetTextureFileName());
+                if (tex.is_valid()) break;
+            }
+        }
+        if (tex.is_valid()) break;
+    }
+
+    // Create a billboard Sprite3D as a placeholder for the particle effect
+    Sprite3D* sprite = memnew(Sprite3D);
+    sprite->set_name(String::utf8(name.c_str()));
+    apply_nif_transform(StaticCast<NiAVObject>(particles), sprite);
+
+    // Billboard mode: always face camera
+    sprite->set_billboard_mode(StandardMaterial3D::BILLBOARD_ENABLED);
+
+    if (tex.is_valid()) {
+        sprite->set_texture(tex);
+        // Scale based on texture size (assume ~1 pixel = 0.1 world units)
+        float w = tex->get_width() * 0.1f;
+        float h = tex->get_height() * 0.1f;
+        sprite->set_pixel_size(0.1f);
+    } else {
+        // No texture — use a small default size
+        sprite->set_pixel_size(0.5f);
+    }
+
+    // Transparent rendering for particle textures (most have alpha)
+    sprite->set_transparency(0.5f);
+    sprite->set_alpha_cut_mode(Sprite3D::ALPHA_CUT_DISCARD);
+
+    // Store particle type as metadata for future full implementation
+    sprite->set_meta("nif_particle_type", String::utf8(type.c_str()));
+    sprite->set_meta("nif_particle_placeholder", true);
+
+    parent->add_child(sprite);
+    UtilityFunctions::print("[PARTICLE] ", String::utf8(type.c_str()),
+        " placeholder: '", String::utf8(name.c_str()),
+        "' tex=", tex.is_valid() ? "yes" : "none");
 }
