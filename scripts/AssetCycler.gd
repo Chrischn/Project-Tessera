@@ -56,6 +56,9 @@ var _auto_cycle_active := false
 var _auto_cycle_index := 0
 var _auto_cycle_start_log_lines := 0
 
+# Scene lights toggle (press F7) — hide scene lights to isolate NIF lights
+var _scene_lights_visible := true
+
 # Diagnostic subset cycle (press F6) — cycle through specific NIFs for analysis
 # Current set: lighting test (NiPointLight, NiDirectionalLight, NiAmbientLight)
 var _diag_targets: Array[String] = [
@@ -102,6 +105,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	# F6: cycle through diagnostic target units
 	if event.keycode == KEY_F6:
 		_cycle_diag_target()
+		return
+	# F7: toggle scene lights to isolate NIF lights
+	if event.keycode == KEY_F7:
+		_toggle_scene_lights()
 		return
 	# Block all other keys during auto-cycle
 	if _auto_cycle_active:
@@ -632,6 +639,19 @@ func _update_anim_hud() -> void:
 		_anim_hud_label.text = "[P] %s  (%d/%d)" \
 			% [_anim_clip_names[_anim_clip_index],
 			   _anim_clip_index + 1, _anim_clip_names.size()]
+
+
+func _toggle_scene_lights() -> void:
+	_scene_lights_visible = !_scene_lights_visible
+	# Toggle all DirectionalLight3D/OmniLight3D/SpotLight3D in the scene root
+	# (these are the scene-level lights, not NIF-loaded lights)
+	var scene_root := get_tree().current_scene
+	if scene_root:
+		for child in scene_root.get_children():
+			if child is DirectionalLight3D or child is OmniLight3D or child is SpotLight3D:
+				child.visible = _scene_lights_visible
+	var state := "ON" if _scene_lights_visible else "OFF"
+	print("Scene lights: %s (F7 to toggle)" % state)
 
 
 func _update_hud() -> void:
