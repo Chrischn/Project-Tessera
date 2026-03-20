@@ -30,6 +30,8 @@
 #include <obj/NiPosData.h>
 #include <obj/NiVisData.h>
 #include <obj/NiFloatInterpolator.h>
+#include <obj/NiBoolInterpolator.h>
+#include <obj/NiBoolData.h>
 #include <obj/NiSourceTexture.h>
 #include <gen/enums.h>
 
@@ -416,10 +418,24 @@ void GdextNiflib::build_scene_animations(const String& base_path, Node3D* root_g
         // Maps to Node3D visible property via discrete boolean keys.
         else if (auto vc = DynamicCast<NiVisController>(ctrl)) {
             // NiVisController targets node visibility, not material
-            vc->NormalizeKeys();
+            if (vc->GetInterpolator() != NULL) vc->NormalizeKeys();
+
+            // Try legacy NiVisData first, then fall back to interpolator (NiBoolInterpolator -> NiBoolData).
+            // Civ4 v20.0.0.4 stores visibility keys on the interpolator, not in legacy GetData().
+            std::vector<Niflib::Key<unsigned char>> keys;
             NiVisDataRef vis_data = vc->GetData();
-            if (!vis_data) {
-                UtilityFunctions::push_warning("[CTRL] NiVisController: no vis data");
+            if (vis_data) {
+                keys = vis_data->GetKeys();
+            }
+            if (keys.empty()) {
+                auto bool_interp = DynamicCast<NiBoolInterpolator>(vc->GetInterpolator());
+                if (bool_interp) {
+                    NiBoolDataRef bool_data = bool_interp->GetData();
+                    if (bool_data) keys = bool_data->GetKeys();
+                }
+            }
+            if (keys.empty()) {
+                UtilityFunctions::push_warning("[CTRL] NiVisController: no vis data (legacy or interpolator)");
                 continue;
             }
 
@@ -428,7 +444,6 @@ void GdextNiflib::build_scene_animations(const String& base_path, Node3D* root_g
             anim->track_set_path(track, NodePath(track_path));
             anim->value_track_set_update_mode(track, Animation::UPDATE_DISCRETE);
 
-            auto keys = vis_data->GetKeys();
             for (const auto& k : keys) {
                 bool visible = (k.data != 0);
                 anim->track_insert_key(track, k.time - start_time, visible);
