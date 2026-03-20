@@ -1919,21 +1919,36 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 break;
             }
 
-            // Track rotation correction for non-re-parented skeletons.
+            // Track hybrid correction for non-re-parented skeletons.
+            // When prefix is large (>5°): use inv(prefix) to remove only double-counting.
+            // When prefix is near zero: use inv(R) to fix composition law error.
             {
+                godot::Transform3D pfx = nif_matrix44_to_godot(prefix_nif);
+                float pfx_angle = godot::Math::rad_to_deg(
+                    pfx.basis.orthonormalized().get_rotation_quaternion().get_angle());
+
                 godot::Transform3D correction;
-                bool found_bone = false;
-                for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
-                    if (skin_bones[ci] == NULL) continue;
-                    auto cit = bone_index_map.find(skin_bones[ci]);
-                    if (cit == bone_index_map.end()) continue;
-                    godot::Transform3D bone_rest = compute_bone_global_rest(skeleton, cit->second);
-                    godot::Transform3D R = bone_rest * per_mesh_skin->get_bind_pose(cit->second);
-                    correction = godot::Transform3D(R.basis.inverse().orthonormalized(), godot::Vector3());
-                    found_bone = true;
-                    break;
+                bool found_correction = false;
+
+                if (pfx_angle > 5.0f) {
+                    // Large prefix: use inv(prefix) to avoid over-correcting genuine mismatch
+                    correction = godot::Transform3D(pfx.basis.inverse().orthonormalized(), godot::Vector3());
+                    found_correction = true;
+                } else {
+                    // Near-zero prefix: use inv(R) to correct composition law error
+                    for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
+                        if (skin_bones[ci] == NULL) continue;
+                        auto cit = bone_index_map.find(skin_bones[ci]);
+                        if (cit == bone_index_map.end()) continue;
+                        godot::Transform3D bone_rest = compute_bone_global_rest(skeleton, cit->second);
+                        godot::Transform3D R = bone_rest * per_mesh_skin->get_bind_pose(cit->second);
+                        correction = godot::Transform3D(R.basis.inverse().orthonormalized(), godot::Vector3());
+                        found_correction = true;
+                        break;
+                    }
                 }
-                if (found_bone) {
+
+                if (found_correction) {
                     rotation_correction_mismatch_count[skel_root]++;
                     auto rc_it = rotation_correction_cache.find(skel_root);
                     if (rc_it == rotation_correction_cache.end()) {
@@ -1946,7 +1961,7 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                         float angle_deg = dot < 1.0f
                             ? godot::Math::rad_to_deg(2.0f * std::acos(std::min(dot, 1.0f)))
                             : 0.0f;
-                        if (angle_deg > 8.0f) {
+                        if (angle_deg > 15.0f) {
                             rotation_correction_consistent[skel_root] = false;
                         }
                     }
