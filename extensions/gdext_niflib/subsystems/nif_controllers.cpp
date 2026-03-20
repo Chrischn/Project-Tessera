@@ -524,7 +524,7 @@ void GdextNiflib::build_scene_animations(const String& base_path, Node3D* root_g
     lib.instantiate();
     lib->add_animation("scene_controllers", anim);
     anim_player->add_animation_library("", lib);
-    anim_player->set_autoplay("scene_controllers");
+    anim_player->play("scene_controllers");
 
     UtilityFunctions::print("[CTRL] _SceneAnimPlayer created: ", anim->get_track_count(),
         " tracks, duration=", anim->get_length(), "s, loop=", any_loop ? "YES" : "NO");
