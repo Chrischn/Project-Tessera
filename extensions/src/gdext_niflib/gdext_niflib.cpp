@@ -1329,7 +1329,18 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
             // Deferred rotation correction for non-re-parented skeletons only.
             // Re-parented skeletons already have correct orientation via common ancestor.
             for (auto& [skel_root_ni, skel] : skeleton_cache) {
-                if (reparented_skeletons.count(skel_root_ni)) continue;  // skip re-parented
+                // For re-parented skeletons: only skip if prefix was large (>5°).
+                // Re-parenting fixes prefix double-counting but NOT composition law errors.
+                // Near-zero prefix means R is purely composition error → still needs correction.
+                if (reparented_skeletons.count(skel_root_ni)) {
+                    auto pfx_first = prefix_all_first.find(skel_root_ni);
+                    if (pfx_first != prefix_all_first.end()) {
+                        float pfx_angle = godot::Math::rad_to_deg(pfx_first->second.get_angle());
+                        if (pfx_angle > 5.0f) continue;
+                    } else {
+                        continue;
+                    }
+                }
                 auto rc_it = rotation_correction_cache.find(skel_root_ni);
                 if (rc_it == rotation_correction_cache.end()) continue;
                 auto con_it = rotation_correction_consistent.find(skel_root_ni);
@@ -1339,9 +1350,14 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
                     MeshInstance3D* mi = Object::cast_to<MeshInstance3D>(skel->get_child(ci));
                     if (mi && mi->get_skin().is_valid()) skinned_mesh_count++;
                 }
+                // Apply correction when:
+                // 1. At least one mismatch mesh exists (correction was computed)
+                // 2. All skinned meshes share the same prefix (correction is safe for all)
                 auto mc_it = rotation_correction_mismatch_count.find(skel_root_ni);
                 int mismatch_count = (mc_it != rotation_correction_mismatch_count.end()) ? mc_it->second : 0;
-                if (mismatch_count == skinned_mesh_count) {
+                auto pfx_con = prefix_all_consistent.find(skel_root_ni);
+                bool all_prefix_same = pfx_con != prefix_all_consistent.end() && pfx_con->second;
+                if (mismatch_count > 0 && all_prefix_same) {
                     skel->set_transform(rc_it->second);
                 }
             }
@@ -1374,6 +1390,8 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         rotation_correction_cache.clear();
         rotation_correction_consistent.clear();
         rotation_correction_mismatch_count.clear();
+        prefix_all_first.clear();
+        prefix_all_consistent.clear();
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -1827,6 +1845,27 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
             walk_node = walk_node->GetParent();
         }
         Niflib::Matrix44 prefix_nif_inv = prefix_nif.Inverse();
+
+        // Track prefix consistency across ALL skinned meshes on this skeleton.
+        // Correction is only safe when all meshes share the same prefix rotation.
+        {
+            Niflib::NiNodeRef pfx_skel_root = skin->GetSkeletonRoot();
+            godot::Transform3D pfx = nif_matrix44_to_godot(prefix_nif);
+            godot::Quaternion pfx_q = pfx.basis.orthonormalized().get_rotation_quaternion();
+            auto pfx_it = prefix_all_first.find(pfx_skel_root);
+            if (pfx_it == prefix_all_first.end()) {
+                prefix_all_first[pfx_skel_root] = pfx_q;
+                prefix_all_consistent[pfx_skel_root] = true;
+            } else if (prefix_all_consistent[pfx_skel_root]) {
+                float dot = std::abs(pfx_it->second.dot(pfx_q));
+                float angle = dot < 1.0f
+                    ? godot::Math::rad_to_deg(2.0f * std::acos(std::min(dot, 1.0f)))
+                    : 0.0f;
+                if (angle > 15.0f) {
+                    prefix_all_consistent[pfx_skel_root] = false;
+                }
+            }
+        }
 
         // Compare NiNode-derived rest vs NiSkinData bind for up to 3 skin bones.
         std::vector<Niflib::NiNodeRef> skin_bones = skin->GetBones();

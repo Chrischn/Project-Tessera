@@ -155,6 +155,11 @@ public:
     std::map<Niflib::NiNode*, bool> rotation_correction_consistent;
     std::map<Niflib::NiNode*, int> rotation_correction_mismatch_count;
 
+    // Prefix consistency across ALL skinned meshes (not just mismatch).
+    // Correction is only safe when all meshes share the same prefix rotation.
+    std::map<Niflib::NiNode*, godot::Quaternion> prefix_all_first;
+    std::map<Niflib::NiNode*, bool> prefix_all_consistent;
+
     // --- Team color ---
     // Applied at runtime to all meshes that carry a DARK_MAP (slot 1) mask texture.
     // Defaults to white (no tinting). Set before calling load_nif_scene().
