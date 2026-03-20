@@ -1326,9 +1326,10 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
             // animated bones.
             reparent_bone_attachments(root_node, godotnode);
 
-            // Deferred rotation correction: apply only when ALL mismatch meshes
-            // agree on R AND every skinned mesh triggered mismatch.
+            // Deferred rotation correction for non-re-parented skeletons only.
+            // Re-parented skeletons already have correct orientation via common ancestor.
             for (auto& [skel_root_ni, skel] : skeleton_cache) {
+                if (reparented_skeletons.count(skel_root_ni)) continue;  // skip re-parented
                 auto rc_it = rotation_correction_cache.find(skel_root_ni);
                 if (rc_it == rotation_correction_cache.end()) continue;
                 auto con_it = rotation_correction_consistent.find(skel_root_ni);
@@ -1367,11 +1368,12 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
         bone_index_map.clear();
         skeleton_cache.clear();
         skin_cache.clear();
+        skeleton_host_map.clear();
+        ni_to_godot_node.clear();
+        reparented_skeletons.clear();
         rotation_correction_cache.clear();
         rotation_correction_consistent.clear();
         rotation_correction_mismatch_count.clear();
-        skeleton_host_map.clear();
-        ni_to_godot_node.clear();
 
     } catch (const std::exception& e) {
         UtilityFunctions::push_error("Error loading NIF: ", e.what());
@@ -1917,7 +1919,7 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 break;
             }
 
-            // Track rotation correction with consistency check across meshes.
+            // Track rotation correction for non-re-parented skeletons.
             {
                 godot::Transform3D correction;
                 bool found_bone = false;
@@ -2193,6 +2195,7 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                                     skeleton->get_parent()->remove_child(skeleton);
                                     ca_it->second->add_child(skeleton);
                                     skeleton_host_map[skel_root] = common;
+                                    reparented_skeletons.insert(skel_root);
                                 }
                             }
                         }
@@ -2272,6 +2275,7 @@ void GdextNiflib::process_ni_node(NiNodeRef ni_node, Node3D* parent_godot, const
                                     skeleton->get_parent()->remove_child(skeleton);
                                     ca_it->second->add_child(skeleton);
                                     skeleton_host_map[skel_root] = common;
+                                    reparented_skeletons.insert(skel_root);
                                 }
                             }
                         }
