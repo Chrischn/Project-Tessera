@@ -1357,6 +1357,26 @@ void GdextNiflib::load_nif_scene(const String& file_path, Node3D* godotnode, con
                 int mismatch_count = (mc_it != rotation_correction_mismatch_count.end()) ? mc_it->second : 0;
                 auto pfx_con = prefix_all_consistent.find(skel_root_ni);
                 bool all_prefix_same = pfx_con != prefix_all_consistent.end() && pfx_con->second;
+
+                // Diagnostic: log the deferred correction decision for every skeleton
+                {
+                    bool is_reparented = reparented_skeletons.count(skel_root_ni) > 0;
+                    auto pfx_f = prefix_all_first.find(skel_root_ni);
+                    float pfx_a = (pfx_f != prefix_all_first.end())
+                        ? godot::Math::rad_to_deg(pfx_f->second.get_angle()) : -1.0f;
+                    godot::Quaternion corr_q = rc_it->second.basis.orthonormalized().get_rotation_quaternion();
+                    float corr_angle = godot::Math::rad_to_deg(corr_q.get_angle());
+                    bool will_apply = (mismatch_count > 0 && all_prefix_same);
+                    UtilityFunctions::print("[CORR] skel_bones=", skel->get_bone_count(),
+                        " reparented=", is_reparented ? "YES" : "NO",
+                        " pfx_angle=", pfx_a,
+                        " pfx_consistent=", all_prefix_same ? "YES" : "NO",
+                        " mismatch=", mismatch_count, "/", skinned_mesh_count,
+                        " R_consistent=", con_it->second ? "YES" : "NO",
+                        " corr_angle=", corr_angle,
+                        " APPLIED=", will_apply ? "YES" : "NO");
+                }
+
                 if (mismatch_count > 0 && all_prefix_same) {
                     skel->set_transform(rc_it->second);
                 }
@@ -1970,9 +1990,22 @@ Node3D* GdextNiflib::process_tri_geometry(NiTriBasedGeomRef geom, const String& 
                 bool found_correction = false;
 
                 if (pfx_angle > 5.0f) {
-                    // Large prefix: use inv(prefix) to avoid over-correcting genuine mismatch
-                    correction = godot::Transform3D(pfx.basis.inverse().orthonormalized(), godot::Vector3());
-                    found_correction = true;
+                    // Large prefix: use inv(prefix), but only if R is also significant (>5°).
+                    // If R ≈ 0° (positional-only mismatch), no rotation correction needed.
+                    for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
+                        if (skin_bones[ci] == NULL) continue;
+                        auto cit = bone_index_map.find(skin_bones[ci]);
+                        if (cit == bone_index_map.end()) continue;
+                        godot::Transform3D br = compute_bone_global_rest(skeleton, cit->second);
+                        godot::Transform3D R = br * per_mesh_skin->get_bind_pose(cit->second);
+                        float R_deg = godot::Math::rad_to_deg(
+                            R.basis.orthonormalized().get_rotation_quaternion().get_angle());
+                        if (R_deg > 5.0f) {
+                            correction = godot::Transform3D(pfx.basis.inverse().orthonormalized(), godot::Vector3());
+                            found_correction = true;
+                        }
+                        break;
+                    }
                 } else {
                     // Near-zero prefix: use inv(R) to correct composition law error
                     for (unsigned int ci = 0; ci < skin_bone_count; ++ci) {
