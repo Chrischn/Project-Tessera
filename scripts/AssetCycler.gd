@@ -56,11 +56,22 @@ var _auto_cycle_active := false
 var _auto_cycle_index := 0
 var _auto_cycle_start_log_lines := 0
 
-# Diagnostic subset cycle (press F6) — cycle through specific units for analysis
+# Diagnostic subset cycle (press F6) — cycle through specific NIFs for analysis
+# Current set: lighting test (NiPointLight, NiDirectionalLight, NiAmbientLight)
 var _diag_targets: Array[String] = [
-	"bear.nif", "cannon.nif", "cavalry.nif", "chariot.nif",
-	"caravel.nif", "bomber.nif", "fighter.nif",
-	"horsearcher.nif", "crossbowman.nif", "greatmerchantancient.nif",
+	"fx_fire_candle_flame.nif",     # NiPointLight — warm candle glow
+	"fx_fire_candle_hardware_light.nif", # NiPointLight variant
+	"fx_rifleblast_modern.nif",     # NiPointLight — muzzle flash
+	"fx_rifleblast_old.nif",        # NiPointLight — musket flash
+	"washington_bg.nif",            # NiPointLight — leader screen fill lights
+	"con_found.nif",                # NiPointLight — religion movie scene
+	"hin_found.nif",                # NiPointLight — religion movie scene
+	"bomb.nif",                     # NiDirectionalLight
+	"sunlight.nif",                 # NiDirectionalLight — terrain sun
+	"terrainlight.nif",             # NiDirectionalLight — terrain fill
+	"mechlight.nif",                # NiDirectionalLight — mechanical light
+	"worldcap.nif",                 # NiDirectionalLight — globe cap
+	"loadingscreenbg.nif",          # NiPointLight — loading screen
 ]
 var _diag_cycle_index := 0
 
