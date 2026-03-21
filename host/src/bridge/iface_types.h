@@ -64,6 +64,7 @@ struct CvFont;
 struct CvTalkingHeadMessage;
 struct CvAudioGame;
 struct ProfileSample;
+struct TradeData;
 
 // =============================================================================
 // 3. Engine/library opaque types
@@ -173,16 +174,20 @@ enum DiploEventTypes   {};
 enum NetContactTypes   {};
 enum ChatTargetTypes   { NO_CHATTARGET = -1 };
 
+// Projects/Processes
+enum ProjectTypes          { NO_PROJECT = -1 };
+enum ProcessTypes          { NO_PROCESS = -1 };
+
 // UI/Interface
 enum InterfaceModeTypes    {};
-enum InterfaceMessageTypes {};
+enum InterfaceMessageTypes { MESSAGE_TYPE_INFO = 0 };
 enum InterfaceVisibility   {};
 enum MinimapModeTypes      {};
 enum CityTabTypes          {};
-enum WidgetTypes           {};
+enum WidgetTypes           { WIDGET_GENERAL = 0 };
 enum PopupStates           { POPUPSTATE_QUEUED = 0 };
 enum PopupEventTypes       {};
-enum PopupControlLayout    {};
+enum PopupControlLayout    { POPUP_LAYOUT_CENTER = 0, POPUP_LAYOUT_LEFT, POPUP_LAYOUT_STRETCH };
 enum InterfaceDirtyBits    {};
 
 // Camera
@@ -224,3 +229,15 @@ typedef int(*FAStarFunc)(FAStarNode*, FAStarNode*, int, const void*, FAStar*);
 #ifndef MAX_INT
 #define MAX_INT 0x7FFFFFFF
 #endif
+
+// DLL font justification flags (used as default params in CvDLLInterfaceIFaceBase)
+enum {
+    DLL_FONT_LEFT_JUSTIFY   = 1 << 0,
+    DLL_FONT_RIGHT_JUSTIFY  = 1 << 1,
+    DLL_FONT_CENTER_JUSTIFY = 1 << 2
+};
+
+// =============================================================================
+// 13. Typedef collections used in interface signatures
+// =============================================================================
+typedef std::list<CvPopupInfo*> CvPopupQueue;
