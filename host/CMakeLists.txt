@@ -26,7 +26,7 @@ file(GLOB_RECURSE HOST_SOURCES src/*.cpp)
 add_executable(TesseraHost ${HOST_SOURCES})
 
 target_include_directories(TesseraHost PRIVATE src src/bridge relay/include)
-target_link_libraries(TesseraHost PRIVATE pugixml yyjson ws2_32)
+target_link_libraries(TesseraHost PRIVATE pugixml yyjson ws2_32 ole32 oleaut32)
 
 # Windows-specific
 if(WIN32)

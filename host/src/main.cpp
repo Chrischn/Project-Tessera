@@ -17,6 +17,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <objbase.h>
 
 #include "tcp_server.h"
 #include "message_protocol.h"
@@ -44,6 +45,7 @@ static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* ep) {
 
 int main(int argc, char* argv[]) {
     SetUnhandledExceptionFilter(CrashHandler);
+    CoInitialize(NULL);
     printf("[TesseraHost] Starting (32-bit host process)\n");
     printf("[TesseraHost] Build: %s %s\n", __DATE__, __TIME__);
     printf("[TesseraHost] sizeof(void*) = %zu (must be 4)\n", sizeof(void*));
@@ -97,5 +99,6 @@ int main(int argc, char* argv[]) {
     printf("[TesseraHost] Shutting down.\n");
     dll_loader.unload();
     server.shutdown();
+    CoUninitialize();
     return 0;
 }

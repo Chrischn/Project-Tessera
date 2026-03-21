@@ -14,9 +14,6 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
-#include <ole2.h>
-#include <msxml2.h>
-
 #include "host_callbacks.h"
 
 #include <pugixml.hpp>
@@ -39,16 +36,6 @@ extern std::string g_modName;
 // =============================================================================
 
 struct FXml {
-    // Bytes 0x00-0x2F: padding to match original FXml layout
-    char _pad[0x30];
-
-    // Offset 0x30: IXMLDOMDocument* — game DLL expects this here
-    IXMLDOMDocument* pDoc;
-
-    // Offset 0x34: IXMLDOMNode* — game DLL reads values from this directly
-    IXMLDOMNode* pCurNode;
-
-    // --- Our internal state (after game DLL's expected layout) ---
     pugi::xml_document doc;
     pugi::xml_node current_node;
     bool loaded = false;
@@ -76,30 +63,12 @@ static void cb_trace(const char* name) {
 
 static void* cb_xml_create(void* schema_cache) {
     cb_trace("cb_xml_create");
-    FXml* xml = new FXml();
-    memset(xml->_pad, 0, sizeof(xml->_pad));
-    xml->pDoc = nullptr;
-    xml->pCurNode = nullptr;
-
-    HRESULT hr = CoCreateInstance(
-        __uuidof(DOMDocument), NULL, CLSCTX_INPROC_SERVER,
-        __uuidof(IXMLDOMDocument), (void**)&xml->pDoc);
-    if (FAILED(hr)) {
-        fprintf(stderr, "[XML] WARNING: CoCreateInstance MSXML failed: 0x%08X\n", (unsigned)hr);
-    } else {
-        xml->pDoc->put_async(VARIANT_FALSE);
-        xml->pDoc->put_validateOnParse(VARIANT_FALSE);
-        xml->pDoc->put_resolveExternals(VARIANT_FALSE);
-    }
-    return xml;
+    return new FXml();
 }
 
 static void cb_xml_destroy(void* xml_ptr) {
     cb_trace("cb_xml_destroy");
-    FXml* xml = static_cast<FXml*>(xml_ptr);
-    if (xml->pCurNode) { xml->pCurNode->Release(); xml->pCurNode = nullptr; }
-    if (xml->pDoc) { xml->pDoc->Release(); xml->pDoc = nullptr; }
-    delete xml;
+    delete static_cast<FXml*>(xml_ptr);
 }
 
 static void* cb_xml_create_schema_cache() {
@@ -184,34 +153,6 @@ static int cb_xml_load(void* xml_ptr, const char* path) {
     }
     xml->current_node = xml->doc.document_element();
     xml->loaded = true;
-
-    // Load into MSXML (for game DLL direct access at offset 0x34)
-    if (xml->pDoc) {
-        if (xml->pCurNode) { xml->pCurNode->Release(); xml->pCurNode = nullptr; }
-
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, resolved.c_str(), -1, NULL, 0);
-        std::wstring wpath(wlen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, resolved.c_str(), -1, &wpath[0], wlen);
-
-        VARIANT_BOOL success = VARIANT_FALSE;
-        VARIANT vpath;
-        VariantInit(&vpath);
-        vpath.vt = VT_BSTR;
-        vpath.bstrVal = SysAllocString(wpath.c_str());
-        xml->pDoc->load(vpath, &success);
-        SysFreeString(vpath.bstrVal);
-
-        if (success == VARIANT_TRUE) {
-            IXMLDOMElement* pRoot = nullptr;
-            xml->pDoc->get_documentElement(&pRoot);
-            if (pRoot) {
-                xml->pCurNode = pRoot; // IXMLDOMElement inherits IXMLDOMNode
-            }
-        } else {
-            fprintf(stderr, "[XML] WARNING: MSXML failed to load %s\n", resolved.c_str());
-        }
-    }
-
     return 1;
 }
 
