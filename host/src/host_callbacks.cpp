@@ -49,10 +49,9 @@ struct FXmlSchemaCache {
 // =============================================================================
 // Debug: global call counter to identify last callback before crash
 // =============================================================================
-static int g_cbCallCount = 0;
-static const char* g_cbLastName = "";
-
-static int g_cbLoadXmlCount = 0;  // counts xml_load calls to know which step we're in
+int g_cbCallCount = 0;
+const char* g_cbLastName = "";
+const char* g_cbLastXmlFile = "";
 
 static void cb_trace(const char* name) {
     g_cbCallCount++;
@@ -121,8 +120,8 @@ static std::string resolve_xml_path(const char* path) {
 }
 
 static int cb_xml_load(void* xml_ptr, const char* path) {
-    g_cbLoadXmlCount++;
     cb_trace("cb_xml_load");
+    g_cbLastXmlFile = path ? path : "";
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string resolved = resolve_xml_path(path);
     fprintf(stderr, "[XML] Loading: %s\n", resolved.c_str());
@@ -140,6 +139,7 @@ static int cb_xml_load(void* xml_ptr, const char* path) {
 }
 
 static int cb_xml_locate_node(void* xml_ptr, const char* path) {
+    cb_trace("cb_xml_locate_node");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     if (!xml->loaded || !path) return 0;
 
@@ -161,9 +161,10 @@ static int cb_xml_locate_node(void* xml_ptr, const char* path) {
 }
 
 static int cb_xml_set_to_child(void* xml_ptr) {
+    cb_trace("cb_xml_set_to_child");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node child = xml->current_node.first_child();
-    while (child && child.type() == pugi::node_comment)
+    while (child && child.type() != pugi::node_element)
         child = child.next_sibling();
     if (!child) return 0;
     xml->current_node = child;
@@ -171,6 +172,13 @@ static int cb_xml_set_to_child(void* xml_ptr) {
 }
 
 static int cb_xml_set_to_child_by_tag(void* xml_ptr, const char* tag) {
+    cb_trace("cb_xml_set_to_child_by_tag");
+    if (g_cbCallCount == 285872) {
+        fprintf(stderr, "[CRASH_POINT] SetToChildByTagName xml=%p tag='%s' node='%s'\n",
+            xml_ptr, tag ? tag : "(null)",
+            xml_ptr ? static_cast<FXml*>(xml_ptr)->current_node.name() : "BAD_PTR");
+        fflush(stderr);
+    }
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node child = xml->current_node.child(tag);
     if (!child) return 0;
@@ -179,6 +187,7 @@ static int cb_xml_set_to_child_by_tag(void* xml_ptr, const char* tag) {
 }
 
 static int cb_xml_set_to_parent(void* xml_ptr) {
+    cb_trace("cb_xml_set_to_parent");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node parent = xml->current_node.parent();
     if (!parent) return 0;
@@ -187,9 +196,10 @@ static int cb_xml_set_to_parent(void* xml_ptr) {
 }
 
 static int cb_xml_next_sibling(void* xml_ptr) {
+    cb_trace("cb_xml_next_sibling");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node sib = xml->current_node.next_sibling();
-    while (sib && sib.type() == pugi::node_comment)
+    while (sib && sib.type() != pugi::node_element)
         sib = sib.next_sibling();
     if (!sib) return 0;
     xml->current_node = sib;
@@ -200,7 +210,7 @@ static int cb_xml_prev_sibling(void* xml_ptr) {
     cb_trace("cb_xml_prev_sibling");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node sib = xml->current_node.previous_sibling();
-    while (sib && sib.type() == pugi::node_comment)
+    while (sib && sib.type() != pugi::node_element)
         sib = sib.previous_sibling();
     if (!sib) return 0;
     xml->current_node = sib;
@@ -279,6 +289,13 @@ static int cb_xml_get_value_float(void* xml_ptr, float* val) {
 
 static int cb_xml_get_value_bool(void* xml_ptr, int* val) {
     cb_trace("cb_xml_get_value_bool");
+    // Log details near crash point
+    if (g_cbCallCount >= 107640 && g_cbCallCount <= 107650) {
+        fprintf(stderr, "[CB #%d] get_value_bool xml=%p val=%p node='%s'\n",
+            g_cbCallCount, xml_ptr, (void*)val,
+            xml_ptr ? static_cast<FXml*>(xml_ptr)->current_node.name() : "NULL");
+        fflush(stderr);
+    }
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
     if (text.empty()) return 0;
@@ -323,7 +340,7 @@ static int cb_xml_get_num_children(void* xml_ptr) {
     int count = 0;
     for (pugi::xml_node child = xml->current_node.first_child(); child;
          child = child.next_sibling()) {
-        if (child.type() != pugi::node_comment) count++;
+        if (child.type() == pugi::node_element) count++;
     }
     return count;
 }
@@ -336,7 +353,7 @@ static int cb_xml_get_num_siblings(void* xml_ptr) {
     int count = 0;
     for (pugi::xml_node sib = parent.first_child(); sib;
          sib = sib.next_sibling()) {
-        if (sib.type() != pugi::node_comment) count++;
+        if (sib.type() == pugi::node_element) count++;
     }
     return count;
 }
@@ -347,7 +364,7 @@ static int cb_xml_num_children_by_tag(void* xml_ptr, const char* tag) {
     int count = 0;
     for (pugi::xml_node child = xml->current_node.first_child(); child;
          child = child.next_sibling()) {
-        if (child.type() != pugi::node_comment && strcmp(child.name(), tag) == 0)
+        if (child.type() == pugi::node_element && strcmp(child.name(), tag) == 0)
             count++;
     }
     return count;
