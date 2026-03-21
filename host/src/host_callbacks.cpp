@@ -47,23 +47,40 @@ struct FXmlSchemaCache {
 };
 
 // =============================================================================
+// Debug: global call counter to identify last callback before crash
+// =============================================================================
+static int g_cbCallCount = 0;
+static const char* g_cbLastName = "";
+
+static int g_cbLoadXmlCount = 0;  // counts xml_load calls to know which step we're in
+
+static void cb_trace(const char* name) {
+    g_cbCallCount++;
+    g_cbLastName = name;
+}
+
+// =============================================================================
 // XML Callback Implementations
 // =============================================================================
 
 static void* cb_xml_create(void* schema_cache) {
+    cb_trace("cb_xml_create");
     FXml* xml = new FXml();
     return xml;
 }
 
 static void cb_xml_destroy(void* xml) {
+    cb_trace("cb_xml_destroy");
     delete static_cast<FXml*>(xml);
 }
 
 static void* cb_xml_create_schema_cache() {
+    cb_trace("cb_xml_create_schema_cache");
     return new FXmlSchemaCache();
 }
 
 static void cb_xml_destroy_schema_cache(void* cache) {
+    cb_trace("cb_xml_destroy_schema_cache");
     delete static_cast<FXmlSchemaCache*>(cache);
 }
 
@@ -104,6 +121,8 @@ static std::string resolve_xml_path(const char* path) {
 }
 
 static int cb_xml_load(void* xml_ptr, const char* path) {
+    g_cbLoadXmlCount++;
+    cb_trace("cb_xml_load");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string resolved = resolve_xml_path(path);
     fprintf(stderr, "[XML] Loading: %s\n", resolved.c_str());
@@ -121,7 +140,6 @@ static int cb_xml_load(void* xml_ptr, const char* path) {
 }
 
 static int cb_xml_locate_node(void* xml_ptr, const char* path) {
-    fprintf(stderr, "[CB] xml_locate_node(%p, %s)\n", xml_ptr, path ? path : "(null)");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     if (!xml->loaded || !path) return 0;
 
@@ -143,7 +161,6 @@ static int cb_xml_locate_node(void* xml_ptr, const char* path) {
 }
 
 static int cb_xml_set_to_child(void* xml_ptr) {
-    fprintf(stderr, "[CB] xml_set_to_child(%p)\n", xml_ptr);
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node child = xml->current_node.first_child();
     while (child && child.type() == pugi::node_comment)
@@ -154,7 +171,6 @@ static int cb_xml_set_to_child(void* xml_ptr) {
 }
 
 static int cb_xml_set_to_child_by_tag(void* xml_ptr, const char* tag) {
-    fprintf(stderr, "[CB] xml_set_to_child_by_tag(%p, %s)\n", xml_ptr, tag ? tag : "(null)");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node child = xml->current_node.child(tag);
     if (!child) return 0;
@@ -163,7 +179,6 @@ static int cb_xml_set_to_child_by_tag(void* xml_ptr, const char* tag) {
 }
 
 static int cb_xml_set_to_parent(void* xml_ptr) {
-    fprintf(stderr, "[CB] xml_set_to_parent(%p)\n", xml_ptr);
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node parent = xml->current_node.parent();
     if (!parent) return 0;
@@ -172,7 +187,6 @@ static int cb_xml_set_to_parent(void* xml_ptr) {
 }
 
 static int cb_xml_next_sibling(void* xml_ptr) {
-    fprintf(stderr, "[CB] xml_next_sibling(%p)\n", xml_ptr);
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node sib = xml->current_node.next_sibling();
     while (sib && sib.type() == pugi::node_comment)
@@ -183,6 +197,7 @@ static int cb_xml_next_sibling(void* xml_ptr) {
 }
 
 static int cb_xml_prev_sibling(void* xml_ptr) {
+    cb_trace("cb_xml_prev_sibling");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node sib = xml->current_node.previous_sibling();
     while (sib && sib.type() == pugi::node_comment)
@@ -193,6 +208,7 @@ static int cb_xml_prev_sibling(void* xml_ptr) {
 }
 
 static int cb_xml_locate_first_sibling_by_tag(void* xml_ptr, const char* tag) {
+    cb_trace("cb_xml_locate_first_sibling_by_tag");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node parent = xml->current_node.parent();
     if (!parent) return 0;
@@ -203,6 +219,7 @@ static int cb_xml_locate_first_sibling_by_tag(void* xml_ptr, const char* tag) {
 }
 
 static int cb_xml_locate_next_sibling_by_tag(void* xml_ptr, const char* tag) {
+    cb_trace("cb_xml_locate_next_sibling_by_tag");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node sib = xml->current_node.next_sibling(tag);
     if (!sib) return 0;
@@ -222,7 +239,6 @@ static std::string get_node_text(FXml* xml) {
 }
 
 static int cb_xml_get_value_string(void* xml_ptr, char* buf, int buf_size) {
-    fprintf(stderr, "[CB] xml_get_value_string(%p)\n", xml_ptr);
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
     if (text.empty() && !xml->current_node.first_child()) return 0;
@@ -232,6 +248,7 @@ static int cb_xml_get_value_string(void* xml_ptr, char* buf, int buf_size) {
 }
 
 static int cb_xml_get_value_wstring(void* xml_ptr, wchar_t* buf, int buf_size) {
+    cb_trace("cb_xml_get_value_wstring");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
     int needed = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, NULL, 0);
@@ -244,7 +261,6 @@ static int cb_xml_get_value_wstring(void* xml_ptr, wchar_t* buf, int buf_size) {
 }
 
 static int cb_xml_get_value_int(void* xml_ptr, int* val) {
-    fprintf(stderr, "[CB] xml_get_value_int(%p)\n", xml_ptr);
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
     if (text.empty()) return 0;
@@ -253,6 +269,7 @@ static int cb_xml_get_value_int(void* xml_ptr, int* val) {
 }
 
 static int cb_xml_get_value_float(void* xml_ptr, float* val) {
+    cb_trace("cb_xml_get_value_float");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
     if (text.empty()) return 0;
@@ -261,6 +278,7 @@ static int cb_xml_get_value_float(void* xml_ptr, float* val) {
 }
 
 static int cb_xml_get_value_bool(void* xml_ptr, int* val) {
+    cb_trace("cb_xml_get_value_bool");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
     if (text.empty()) return 0;
@@ -269,6 +287,7 @@ static int cb_xml_get_value_bool(void* xml_ptr, int* val) {
 }
 
 static int cb_xml_get_value_uint(void* xml_ptr, unsigned int* val) {
+    cb_trace("cb_xml_get_value_uint");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
     if (text.empty()) return 0;
@@ -277,16 +296,19 @@ static int cb_xml_get_value_uint(void* xml_ptr, unsigned int* val) {
 }
 
 static int cb_xml_get_last_node_text(void* xml_ptr, char* buf, int buf_size) {
+    cb_trace("cb_xml_get_last_node_text");
     return cb_xml_get_value_string(xml_ptr, buf, buf_size);
 }
 
 static int cb_xml_get_last_node_text_size(void* xml_ptr) {
+    cb_trace("cb_xml_get_last_node_text_size");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
     return static_cast<int>(text.size());
 }
 
 static int cb_xml_get_tag_name(void* xml_ptr, char* buf, int buf_size) {
+    cb_trace("cb_xml_get_tag_name");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     const char* name = xml->current_node.name();
     if (!name || !name[0]) return 0;
@@ -296,7 +318,7 @@ static int cb_xml_get_tag_name(void* xml_ptr, char* buf, int buf_size) {
 }
 
 static int cb_xml_get_num_children(void* xml_ptr) {
-    fprintf(stderr, "[CB] xml_get_num_children(%p)\n", xml_ptr);
+    cb_trace("cb_xml_get_num_children");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     int count = 0;
     for (pugi::xml_node child = xml->current_node.first_child(); child;
@@ -307,6 +329,7 @@ static int cb_xml_get_num_children(void* xml_ptr) {
 }
 
 static int cb_xml_get_num_siblings(void* xml_ptr) {
+    cb_trace("cb_xml_get_num_siblings");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node parent = xml->current_node.parent();
     if (!parent) return 0;
@@ -319,6 +342,7 @@ static int cb_xml_get_num_siblings(void* xml_ptr) {
 }
 
 static int cb_xml_num_children_by_tag(void* xml_ptr, const char* tag) {
+    cb_trace("cb_xml_num_children_by_tag");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     int count = 0;
     for (pugi::xml_node child = xml->current_node.first_child(); child;
@@ -330,19 +354,23 @@ static int cb_xml_num_children_by_tag(void* xml_ptr, const char* tag) {
 }
 
 static int cb_xml_num_elements_by_tag(void* xml_ptr, const char* tag) {
+    cb_trace("cb_xml_num_elements_by_tag");
     return cb_xml_num_children_by_tag(xml_ptr, tag);
 }
 
 static int cb_xml_is_comment_node(void* xml_ptr) {
+    cb_trace("cb_xml_is_comment_node");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     return (xml->current_node.type() == pugi::node_comment) ? 1 : 0;
 }
 
 static int cb_xml_is_allow_caching() {
+    cb_trace("cb_xml_is_allow_caching");
     return 0;
 }
 
 static void cb_xml_map_children(void* xml_ptr) {
+    cb_trace("cb_xml_map_children");
     // No-op for MVP
 }
 
@@ -355,6 +383,7 @@ static void cb_log_msg(const char* filename, const char* msg) {
 }
 
 static int cb_get_text(const wchar_t* tag, wchar_t* buf, int buf_size) {
+    cb_trace("cb_get_text");
     if (!tag || buf_size <= 0) return 0;
     int i = 0;
     while (tag[i] && i < buf_size - 1) { buf[i] = tag[i]; i++; }
@@ -363,6 +392,7 @@ static int cb_get_text(const wchar_t* tag, wchar_t* buf, int buf_size) {
 }
 
 static int cb_enumerate_files(const char* pattern, const char*** out_paths) {
+    cb_trace("cb_enumerate_files");
     *out_paths = NULL;
     if (!pattern || !pattern[0]) return 0;
 
@@ -416,6 +446,7 @@ static int cb_enumerate_files(const char* pattern, const char*** out_paths) {
 }
 
 static void cb_free_file_list(const char** paths, int count) {
+    cb_trace("cb_free_file_list");
     if (!paths) return;
     for (int i = 0; i < count; i++)
         free(const_cast<char*>(paths[i]));
@@ -454,6 +485,7 @@ static void enumerate_recursive(std::vector<std::string>& files,
 static int cb_enumerate_module_files(const char* root_dir, const char* mod_dir,
                                       const char* extension, int search_subdirs,
                                       const char*** out_paths) {
+    cb_trace("cb_enumerate_module_files");
     *out_paths = NULL;
     std::vector<std::string> found;
 
@@ -493,19 +525,19 @@ static const char* cb_get_mod_name(int full_path) {
     return g_modName.c_str();
 }
 
-static int cb_get_current_language() { return 0; }
-static int cb_is_modular_xml_loading() { return 0; }
-static int cb_is_game_initializing() { return 1; }
-static int cb_get_cheat_level() { return 0; }
-static int cb_get_audio_tag_index(const char* tag, int script_type) { return -1; }
+static int cb_get_current_language() { cb_trace("cb_get_current_language"); return 0; }
+static int cb_is_modular_xml_loading() { cb_trace("cb_is_modular_xml_loading"); return 0; }
+static int cb_is_game_initializing() { cb_trace("cb_is_game_initializing"); return 1; }
+static int cb_get_cheat_level() { cb_trace("cb_get_cheat_level"); return 0; }
+static int cb_get_audio_tag_index(const char* tag, int script_type) { cb_trace("cb_get_audio_tag_index"); return -1; }
 
-static void* cb_create_cache_object(const char* name) { return NULL; }
-static int cb_cache_read(void* cache, const char* file) { return 0; }
-static int cb_cache_write(void* cache) { return 0; }
-static void cb_destroy_cache(void* cache) { /* no-op */ }
+static void* cb_create_cache_object(const char* name) { cb_trace("cb_create_cache_object"); return NULL; }
+static int cb_cache_read(void* cache, const char* file) { cb_trace("cb_cache_read"); return 0; }
+static int cb_cache_write(void* cache) { cb_trace("cb_cache_write"); return 0; }
+static void cb_destroy_cache(void* cache) { cb_trace("cb_destroy_cache"); }
 
-static void* cb_host_malloc(size_t size) { return malloc(size); }
-static void cb_host_free(void* ptr) { free(ptr); }
+static void* cb_host_malloc(size_t size) { cb_trace("cb_host_malloc"); return malloc(size); }
+static void cb_host_free(void* ptr) { cb_trace("cb_host_free"); free(ptr); }
 
 // =============================================================================
 // Factory function

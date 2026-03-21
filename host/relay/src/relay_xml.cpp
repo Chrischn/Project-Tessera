@@ -35,7 +35,6 @@ public:
 
     void DestroyFXml(FXml*& xml) {
         HostCallbacks* cb = relay_get_callbacks();
-        relay_get_callbacks()->log_msg("relay_debug", "DestroyFXml called!");
         if (xml) {
             cb->xml_destroy(static_cast<void*>(xml));
             xml = NULL;
@@ -85,7 +84,6 @@ public:
 
     bool NextSibling(FXml* xml) {
         HostCallbacks* cb = relay_get_callbacks();
-        cb->log_msg("relay_debug", xml ? "NextSibling ENTER (non-null)" : "NextSibling ENTER (NULL!)");
         return cb->xml_next_sibling(static_cast<void*>(xml)) != 0;
     }
 
@@ -112,23 +110,18 @@ public:
     // --- Mutation stubs (not needed for MVP) ---
 
     bool AddChildNode(FXml* xml, TCHAR* pszNewNode) {
-        relay_get_callbacks()->log_msg("relay_debug", "SLOT14:AddChildNode");
         return false;
     }
     bool AddSiblingNodeBefore(FXml* xml, TCHAR* pszNewNode) {
-        relay_get_callbacks()->log_msg("relay_debug", "SLOT15:AddSiblingNodeBefore");
         return false;
     }
     bool AddSiblingNodeAfter(FXml* xml, TCHAR* pszNewNode) {
-        relay_get_callbacks()->log_msg("relay_debug", "SLOT16:AddSiblingNodeAfter");
         return false;
     }
     bool WriteXml(FXml* xml, TCHAR* pszXmlFile) {
-        relay_get_callbacks()->log_msg("relay_debug", "SLOT17:WriteXml");
         return false;
     }
     bool SetInsertedNodeAttribute(FXml* xml, TCHAR* a, TCHAR* b) {
-        relay_get_callbacks()->log_msg("relay_debug", "SLOT18:SetInsertedNodeAttribute");
         return false;
     }
 
@@ -136,13 +129,11 @@ public:
 
     int GetLastNodeTextSize(FXml* xml) {
         HostCallbacks* cb = relay_get_callbacks();
-        cb->log_msg("relay_debug", "SLOT19:GetLastNodeTextSize");
         return cb->xml_get_last_node_text_size(static_cast<void*>(xml));
     }
 
     bool GetLastNodeText(FXml* xml, TCHAR* pszText) {
         HostCallbacks* cb = relay_get_callbacks();
-        cb->log_msg("relay_debug", "SLOT20:GetLastNodeText(char*)");
         char buf[4096];
         if (!cb->xml_get_last_node_text(static_cast<void*>(xml), buf, sizeof(buf)))
             return false;
@@ -153,7 +144,6 @@ public:
     // *** std::string — this is the key STL isolation method ***
     bool GetLastNodeValue(FXml* xml, std::string& text) {
         HostCallbacks* cb = relay_get_callbacks();
-        cb->log_msg("relay_debug", "SLOT21:GetLastNodeValue(string)");
         char buf[4096];
         if (!cb->xml_get_value_string(static_cast<void*>(xml), buf, sizeof(buf)))
             return false;
@@ -252,7 +242,12 @@ public:
 
     bool GetLastLocatedNodeTagName(FXml* xml, TCHAR* pszTagName) {
         HostCallbacks* cb = relay_get_callbacks();
-        return cb->xml_get_tag_name(static_cast<void*>(xml), pszTagName, 4096) != 0;
+        // Use our own buffer — we don't know the caller's buffer size
+        char buf[4096];
+        if (!cb->xml_get_tag_name(static_cast<void*>(xml), buf, sizeof(buf)))
+            return false;
+        strcpy(pszTagName, buf);
+        return true;
     }
 
     bool IsAllowXMLCaching() {

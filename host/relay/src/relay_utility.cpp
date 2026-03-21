@@ -362,10 +362,6 @@ public:
     }
 
     CvDLLXmlIFaceBase* getXMLIFace() {
-        HostCallbacks* cb = relay_get_callbacks();
-        char msg[128];
-        sprintf(msg, "getXMLIFace() returning %p", (void*)g_pRelayXmlIFace);
-        cb->log_msg("relay_debug", msg);
         return g_pRelayXmlIFace;
     }
 
