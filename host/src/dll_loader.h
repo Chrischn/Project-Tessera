@@ -24,9 +24,13 @@ public:
     // Resolves all required exports: CvGlobals + CvXMLLoadUtility.
     bool load(const std::string& dll_path);
 
-    // Wire our CvDLLUtilityIFaceBase into the DLL's gDLL pointer.
-    // Must be called after load() succeeds.
-    bool wire_interfaces(CvDLLUtilityIFaceBase* utility_iface);
+    // Load TesseraRelay.dll and initialize it with host callbacks.
+    // Must be called before load() (game DLL loading).
+    bool load_relay(const std::string& relay_path);
+
+    // Wire relay's utility interface into game DLL's gDLL pointer.
+    // Must be called after load_relay() and load() succeed.
+    bool wire_interfaces();
 
     // Call CvGlobals::init() to trigger initGlobals callback.
     // Wrapped in SEH __try/__except for crash protection.
@@ -46,6 +50,17 @@ public:
 private:
     HMODULE m_hDll = nullptr;
     void* m_pGlobals = nullptr;  // CvGlobals* (opaque)
+
+    HMODULE m_hRelay = nullptr;
+
+    // Relay function pointer types (C linkage)
+    typedef int  (*RelayInitFn)(void* callbacks);
+    typedef void* (*RelayGetUtilityFn)();
+    typedef void (*RelayShutdownFn)();
+
+    RelayInitFn       m_pfnRelayInit       = nullptr;
+    RelayGetUtilityFn m_pfnRelayGetUtility = nullptr;
+    RelayShutdownFn   m_pfnRelayShutdown   = nullptr;
 
     // =========================================================================
     // CvGlobals function pointers

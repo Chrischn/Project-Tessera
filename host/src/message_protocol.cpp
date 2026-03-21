@@ -12,7 +12,6 @@
 #include "message_protocol.h"
 #include "tcp_server.h"
 #include "dll_loader.h"
-#include "bridge/iface_utility.h"
 
 #include <yyjson.h>
 #include <cstdio>
@@ -94,13 +93,8 @@ std::vector<char> build_error(const char* message) {
 }
 
 // ---------------------------------------------------------------------------
-// Extern: utility interface global (defined in iface_utility.cpp)
-// ---------------------------------------------------------------------------
-extern CvDLLUtilityIFaceBase* g_pUtilityIFace;
-
-// ---------------------------------------------------------------------------
-// Global base_path — set before DLL init so utility interface can use it.
-// The utility interface (iface_utility.cpp) reads this for file enumeration.
+// Global base_path — set before DLL init so host callbacks can use it.
+// The host_callbacks.cpp reads this for file enumeration.
 // ---------------------------------------------------------------------------
 std::string g_basePath;
 std::string g_modName;
@@ -174,15 +168,29 @@ static void handle_init(const char* json, uint32_t len,
     fprintf(stderr, "[Protocol] init: g_basePath = %s\n", g_basePath.c_str());
     fprintf(stderr, "[Protocol] init: g_modName = %s\n", g_modName.c_str());
 
-    // Step 1: Load the DLL and resolve exports
+    // Step 1a: Load TesseraRelay.dll (must happen before game DLL)
+    // Resolve relay path: same directory as TesseraHost.exe
+    char exe_path[MAX_PATH];
+    GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+    std::string exe_dir(exe_path);
+    exe_dir = exe_dir.substr(0, exe_dir.find_last_of("/\\"));
+    std::string relay_path = exe_dir + "\\TesseraRelay.dll";
+
+    if (!dll_loader.load_relay(relay_path)) {
+        auto err = build_error("init: failed to load TesseraRelay.dll");
+        server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        return;
+    }
+
+    // Step 1b: Load the game DLL and resolve exports
     if (!dll_loader.load(dll_path)) {
         auto err = build_error("init: failed to load CvGameCoreDLL.dll");
         server.send_message(err.data(), static_cast<uint32_t>(err.size()));
         return;
     }
 
-    // Step 2: Wire our interface stubs into the DLL's gDLL pointer
-    if (!dll_loader.wire_interfaces(g_pUtilityIFace)) {
+    // Step 2: Wire relay's utility interface into the DLL's gDLL pointer
+    if (!dll_loader.wire_interfaces()) {
         auto err = build_error("init: failed to wire interfaces");
         server.send_message(err.data(), static_cast<uint32_t>(err.size()));
         dll_loader.unload();

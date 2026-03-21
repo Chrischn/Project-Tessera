@@ -12,8 +12,12 @@
 // =============================================================================
 
 #include "dll_loader.h"
+#include "host_callbacks.h"
 #include <cstdio>
 #include <cstring>
+
+// Static HostCallbacks instance — must outlive the relay DLL.
+static HostCallbacks s_hostCallbacks;
 
 // ---------------------------------------------------------------------------
 // load — LoadLibrary + resolve all exports (CvGlobals + CvXMLLoadUtility)
@@ -122,11 +126,70 @@ bool DllLoader::load(const std::string& dll_path) {
 }
 
 // ---------------------------------------------------------------------------
-// wire_interfaces — get the CvGlobals singleton and inject our utility iface
+// load_relay — LoadLibrary TesseraRelay.dll, resolve exports, call relay_init
 // ---------------------------------------------------------------------------
-bool DllLoader::wire_interfaces(CvDLLUtilityIFaceBase* utility_iface) {
+bool DllLoader::load_relay(const std::string& relay_path) {
+    fprintf(stderr, "[RELAY] Loading: %s\n", relay_path.c_str());
+
+    m_hRelay = LoadLibraryA(relay_path.c_str());
+    if (!m_hRelay) {
+        fprintf(stderr, "[RELAY ERROR] LoadLibrary failed: error %lu\n", GetLastError());
+        return false;
+    }
+
+    // Resolve relay exports (plain C names — no mangling)
+    m_pfnRelayInit = (RelayInitFn)GetProcAddress(m_hRelay, "relay_init");
+    m_pfnRelayGetUtility = (RelayGetUtilityFn)GetProcAddress(m_hRelay,
+        "relay_get_utility_iface");
+    m_pfnRelayShutdown = (RelayShutdownFn)GetProcAddress(m_hRelay,
+        "relay_shutdown");
+
+    if (!m_pfnRelayInit || !m_pfnRelayGetUtility || !m_pfnRelayShutdown) {
+        fprintf(stderr, "[RELAY ERROR] Failed to resolve relay exports:\n");
+        fprintf(stderr, "  relay_init:              %s\n",
+                m_pfnRelayInit ? "OK" : "MISSING");
+        fprintf(stderr, "  relay_get_utility_iface: %s\n",
+                m_pfnRelayGetUtility ? "OK" : "MISSING");
+        fprintf(stderr, "  relay_shutdown:           %s\n",
+                m_pfnRelayShutdown ? "OK" : "MISSING");
+        FreeLibrary(m_hRelay);
+        m_hRelay = nullptr;
+        m_pfnRelayInit = nullptr;
+        m_pfnRelayGetUtility = nullptr;
+        m_pfnRelayShutdown = nullptr;
+        return false;
+    }
+
+    fprintf(stderr, "[RELAY] Exports resolved OK\n");
+
+    // Create host callbacks and pass to relay
+    s_hostCallbacks = create_host_callbacks();
+    int rc = m_pfnRelayInit(&s_hostCallbacks);
+    if (rc != 0) {
+        fprintf(stderr, "[RELAY ERROR] relay_init returned %d\n", rc);
+        FreeLibrary(m_hRelay);
+        m_hRelay = nullptr;
+        m_pfnRelayInit = nullptr;
+        m_pfnRelayGetUtility = nullptr;
+        m_pfnRelayShutdown = nullptr;
+        return false;
+    }
+
+    fprintf(stderr, "[RELAY] relay_init succeeded\n");
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// wire_interfaces — get the CvGlobals singleton and inject relay utility iface
+// ---------------------------------------------------------------------------
+bool DllLoader::wire_interfaces() {
     if (!m_hDll || !m_pfnGetInstance || !m_pfnSetDLLIFace) {
         fprintf(stderr, "[DLL ERROR] wire_interfaces called before successful load\n");
+        return false;
+    }
+
+    if (!m_hRelay || !m_pfnRelayGetUtility) {
+        fprintf(stderr, "[DLL ERROR] wire_interfaces called before successful load_relay\n");
         return false;
     }
 
@@ -139,9 +202,17 @@ bool DllLoader::wire_interfaces(CvDLLUtilityIFaceBase* utility_iface) {
     }
     fprintf(stderr, "[DLL] CvGlobals instance at %p\n", m_pGlobals);
 
-    // Wire our utility interface into the DLL's gDLL pointer.
-    m_pfnSetDLLIFace(m_pGlobals, utility_iface);
-    fprintf(stderr, "[DLL] setDLLIFace called successfully\n");
+    // Get the relay's VS2003-compiled utility interface
+    void* utility_ptr = m_pfnRelayGetUtility();
+    if (!utility_ptr) {
+        fprintf(stderr, "[DLL ERROR] relay_get_utility_iface returned null\n");
+        return false;
+    }
+    fprintf(stderr, "[DLL] Relay utility interface at %p\n", utility_ptr);
+
+    // Wire relay's utility interface into the DLL's gDLL pointer.
+    m_pfnSetDLLIFace(m_pGlobals, static_cast<CvDLLUtilityIFaceBase*>(utility_ptr));
+    fprintf(stderr, "[DLL] setDLLIFace called successfully (relay interface)\n");
     return true;
 }
 
@@ -307,8 +378,9 @@ cleanup:
 // unload — free the DLL and reset all state
 // ---------------------------------------------------------------------------
 void DllLoader::unload() {
+    // Unload game DLL first (it depends on relay being loaded)
     if (m_hDll) {
-        fprintf(stderr, "[DLL] Unloading DLL\n");
+        fprintf(stderr, "[DLL] Unloading CvGameCoreDLL\n");
         FreeLibrary(m_hDll);
         m_hDll = nullptr;
     }
@@ -331,4 +403,16 @@ void DllLoader::unload() {
     m_pfnSetupGlobalLandscapeInfo    = nullptr;
     m_pfnLoadPostMenuGlobals         = nullptr;
     m_pfnLoadGlobalText              = nullptr;
+
+    // Unload relay DLL (after game DLL is freed)
+    if (m_hRelay) {
+        fprintf(stderr, "[RELAY] Shutting down relay\n");
+        if (m_pfnRelayShutdown)
+            m_pfnRelayShutdown();
+        FreeLibrary(m_hRelay);
+        m_hRelay = nullptr;
+    }
+    m_pfnRelayInit       = nullptr;
+    m_pfnRelayGetUtility = nullptr;
+    m_pfnRelayShutdown   = nullptr;
 }
