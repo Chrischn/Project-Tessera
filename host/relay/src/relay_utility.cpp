@@ -763,6 +763,7 @@ public:
         fprintf(stderr, "[TesseraRelay] MessageBox: %s — %s\n",
             szCaption ? szCaption : "(null)",
             szText ? szText : "(null)");
+        fflush(stderr);
     }
 
     void SetDone(bool bDone) {
