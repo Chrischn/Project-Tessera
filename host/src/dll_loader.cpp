@@ -19,6 +19,14 @@
 bool DllLoader::load(const std::string& dll_path) {
     fprintf(stderr, "[DLL] Loading: %s\n", dll_path.c_str());
 
+    // Set DLL search directory to the parent of the DLL file.
+    // CvGameCoreDLL.dll depends on boost_python-vc71-mt-1_32.dll and python24.dll
+    // which live alongside it or in the BTS root directory.
+    std::string dll_dir = dll_path.substr(0, dll_path.find_last_of("/\\"));
+    std::string bts_dir = dll_dir.substr(0, dll_dir.find_last_of("/\\")); // up from Assets/
+    fprintf(stderr, "[DLL] Adding DLL search path: %s\n", bts_dir.c_str());
+    SetDllDirectoryA(bts_dir.c_str());
+
     m_hDll = LoadLibraryA(dll_path.c_str());
     if (!m_hDll) {
         fprintf(stderr, "[DLL ERROR] LoadLibrary failed: error %lu\n", GetLastError());
