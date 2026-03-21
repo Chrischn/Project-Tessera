@@ -112,7 +112,24 @@ static void cb_xml_destroy_schema_cache(void* cache) {
     delete static_cast<FXmlSchemaCache*>(cache);
 }
 
-// Path resolution: try mod Assets, then BTS Assets, then BTS root, then base
+// Strip leading "Assets//" or "Assets\" prefix from game DLL paths.
+// The game DLL passes paths like "Assets//xml\Foo.xml" — we need just "xml\Foo.xml"
+// to prepend our own directory roots.
+static std::string strip_assets_prefix(const char* path) {
+    std::string p(path);
+    // Strip "Assets//" or "Assets\" or "Assets/"
+    if (p.size() > 7 && (_strnicmp(p.c_str(), "Assets//", 8) == 0
+                      || _strnicmp(p.c_str(), "Assets\\", 7) == 0
+                      || _strnicmp(p.c_str(), "Assets/", 7) == 0)) {
+        size_t start = p.find_first_not_of("/\\", 6); // skip "Assets" + slashes
+        if (start != std::string::npos)
+            return p.substr(start);
+    }
+    return p;
+}
+
+// Path resolution: try mod Assets, BTS Assets, Warlords Assets, then base.
+// Mirrors the original game's XML search order: BtS overrides Warlords overrides vanilla.
 static std::string resolve_xml_path(const char* path) {
     if (!path || !path[0]) return {};
 
@@ -122,26 +139,29 @@ static std::string resolve_xml_path(const char* path) {
         if (attr != INVALID_FILE_ATTRIBUTES) return path;
     }
 
+    // Strip "Assets//" prefix — game DLL includes it, but we prepend our own root
+    std::string relpath = strip_assets_prefix(path);
+
     // Try mod Assets first
     if (!g_modName.empty()) {
         std::string mod_path = g_basePath + "\\Beyond the Sword\\Mods\\"
-            + g_modName + "\\Assets\\" + path;
+            + g_modName + "\\Assets\\" + relpath;
         DWORD attr = GetFileAttributesA(mod_path.c_str());
         if (attr != INVALID_FILE_ATTRIBUTES) return mod_path;
     }
 
     // BTS Assets
-    std::string bts_assets = g_basePath + "\\Beyond the Sword\\Assets\\" + path;
+    std::string bts_assets = g_basePath + "\\Beyond the Sword\\Assets\\" + relpath;
     DWORD attr = GetFileAttributesA(bts_assets.c_str());
     if (attr != INVALID_FILE_ATTRIBUTES) return bts_assets;
 
-    // BTS root
-    std::string bts_root = g_basePath + "\\Beyond the Sword\\" + path;
-    attr = GetFileAttributesA(bts_root.c_str());
-    if (attr != INVALID_FILE_ATTRIBUTES) return bts_root;
+    // Warlords Assets (BtS inherits content from Warlords — e.g. trait definitions)
+    std::string war_assets = g_basePath + "\\Warlords\\Assets\\" + relpath;
+    attr = GetFileAttributesA(war_assets.c_str());
+    if (attr != INVALID_FILE_ATTRIBUTES) return war_assets;
 
-    // Base install
-    std::string base = g_basePath + "\\" + path;
+    // Base install (vanilla)
+    std::string base = g_basePath + "\\Assets\\" + relpath;
     attr = GetFileAttributesA(base.c_str());
     if (attr != INVALID_FILE_ATTRIBUTES) return base;
 
