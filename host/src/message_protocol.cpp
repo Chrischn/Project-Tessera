@@ -3,14 +3,16 @@
 // Author(s):         Chrischn89
 // Description:
 //   JSON message protocol layer for the TesseraHost bridge. Uses yyjson for
-//   parsing and serialization. Provides command dispatch: ping, shutdown, and
-//   error responses for unknown commands.
+//   parsing and serialization. Provides command dispatch: ping, shutdown, init,
+//   and error responses for unknown commands.
 //
 // License:
 //   Released under the terms of the GNU General Public License version 3.0
 // =============================================================================
 #include "message_protocol.h"
 #include "tcp_server.h"
+#include "dll_loader.h"
+#include "bridge/iface_utility.h"
 
 #include <yyjson.h>
 #include <cstdio>
@@ -92,10 +94,108 @@ std::vector<char> build_error(const char* message) {
 }
 
 // ---------------------------------------------------------------------------
+// Extern: utility interface global (defined in iface_utility.cpp)
+// ---------------------------------------------------------------------------
+extern CvDLLUtilityIFaceBase* g_pUtilityIFace;
+
+// ---------------------------------------------------------------------------
+// resolve_dll_path — build path to CvGameCoreDLL.dll from base_path and mod
+// ---------------------------------------------------------------------------
+static std::string resolve_dll_path(const std::string& base_path,
+                                    const std::string& mod) {
+    // Normalize: ensure no trailing slash on base_path
+    std::string base = base_path;
+    while (!base.empty() && (base.back() == '/' || base.back() == '\\'))
+        base.pop_back();
+
+    if (!mod.empty()) {
+        // Mod DLL: try mod Assets/ first
+        std::string mod_path = base + "/Beyond the Sword/Mods/" + mod
+                             + "/Assets/CvGameCoreDLL.dll";
+        DWORD attr = GetFileAttributesA(mod_path.c_str());
+        if (attr != INVALID_FILE_ATTRIBUTES) {
+            fprintf(stderr, "[DLL] Using mod DLL: %s\n", mod_path.c_str());
+            return mod_path;
+        }
+        fprintf(stderr, "[DLL] Mod DLL not found, falling back to base: %s\n",
+                mod_path.c_str());
+    }
+
+    // Base BTS DLL
+    return base + "/Beyond the Sword/Assets/CvGameCoreDLL.dll";
+}
+
+// ---------------------------------------------------------------------------
+// handle_init — load DLL, wire interfaces, call init
+// ---------------------------------------------------------------------------
+static void handle_init(const char* json, uint32_t len,
+                        TcpServer& server, DllLoader& dll_loader) {
+    // Parse base_path and mod from the JSON
+    yyjson_doc* doc = yyjson_read(json, static_cast<size_t>(len), 0);
+    if (!doc) {
+        auto err = build_error("init: invalid JSON");
+        server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        return;
+    }
+
+    yyjson_val* root = yyjson_doc_get_root(doc);
+    yyjson_val* base_val = yyjson_obj_get(root, "base_path");
+    yyjson_val* mod_val  = yyjson_obj_get(root, "mod");
+
+    if (!base_val || !yyjson_is_str(base_val)) {
+        yyjson_doc_free(doc);
+        auto err = build_error("init: missing or invalid 'base_path' field");
+        server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        return;
+    }
+
+    std::string base_path = yyjson_get_str(base_val);
+    std::string mod;
+    if (mod_val && yyjson_is_str(mod_val))
+        mod = yyjson_get_str(mod_val);
+
+    yyjson_doc_free(doc);
+
+    // Resolve DLL path
+    std::string dll_path = resolve_dll_path(base_path, mod);
+    fprintf(stderr, "[Protocol] init: dll_path = %s\n", dll_path.c_str());
+
+    // Step 1: Load the DLL and resolve exports
+    if (!dll_loader.load(dll_path)) {
+        auto err = build_error("init: failed to load CvGameCoreDLL.dll");
+        server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        return;
+    }
+
+    // Step 2: Wire our interface stubs into the DLL's gDLL pointer
+    if (!dll_loader.wire_interfaces(g_pUtilityIFace)) {
+        auto err = build_error("init: failed to wire interfaces");
+        server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        dll_loader.unload();
+        return;
+    }
+
+    // Step 3: Call CvGlobals::init() (may crash — SEH protected)
+    bool init_ok = dll_loader.initialize();
+    if (!init_ok) {
+        // init() crashed but we still got past loading and wiring.
+        // Report partial success so the caller knows the DLL loaded.
+        auto err = build_error("init: CvGlobals::init() crashed (SEH caught)");
+        server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        return;
+    }
+
+    // Full success
+    auto resp = build_response("ok");
+    server.send_message(resp.data(), static_cast<uint32_t>(resp.size()));
+}
+
+// ---------------------------------------------------------------------------
 // dispatch_command
 // ---------------------------------------------------------------------------
 void dispatch_command(const char* json, uint32_t len,
-                      TcpServer& server, bool* shutdown_flag) {
+                      TcpServer& server, bool* shutdown_flag,
+                      DllLoader& dll_loader) {
     std::string cmd = parse_command(json, len);
 
     if (cmd.empty()) {
@@ -109,6 +209,9 @@ void dispatch_command(const char* json, uint32_t len,
     if (cmd == "ping") {
         auto resp = build_response("ok");
         server.send_message(resp.data(), static_cast<uint32_t>(resp.size()));
+
+    } else if (cmd == "init") {
+        handle_init(json, len, server, dll_loader);
 
     } else if (cmd == "shutdown") {
         auto resp = build_response("ok");

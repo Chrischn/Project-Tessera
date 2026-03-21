@@ -15,6 +15,7 @@
 
 #include "tcp_server.h"
 #include "message_protocol.h"
+#include "dll_loader.h"
 
 int main(int argc, char* argv[]) {
     printf("[TesseraHost] Starting (32-bit host process)\n");
@@ -38,6 +39,7 @@ int main(int argc, char* argv[]) {
     }
 
     TcpServer server;
+    DllLoader dll_loader;
 
     if (!server.init(port)) {
         fprintf(stderr, "[ERROR] Failed to initialize TCP server on port %d\n", port);
@@ -63,10 +65,11 @@ int main(int argc, char* argv[]) {
         }
 
         dispatch_command(msg_buf.data(), static_cast<uint32_t>(msg_buf.size()),
-                         server, &shutdown_requested);
+                         server, &shutdown_requested, dll_loader);
     }
 
     printf("[TesseraHost] Shutting down.\n");
+    dll_loader.unload();
     server.shutdown();
     return 0;
 }
