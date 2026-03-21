@@ -99,6 +99,13 @@ std::vector<char> build_error(const char* message) {
 extern CvDLLUtilityIFaceBase* g_pUtilityIFace;
 
 // ---------------------------------------------------------------------------
+// Global base_path — set before DLL init so utility interface can use it.
+// The utility interface (iface_utility.cpp) reads this for file enumeration.
+// ---------------------------------------------------------------------------
+std::string g_basePath;
+std::string g_modName;
+
+// ---------------------------------------------------------------------------
 // resolve_dll_path — build path to CvGameCoreDLL.dll from base_path and mod
 // ---------------------------------------------------------------------------
 static std::string resolve_dll_path(const std::string& base_path,
@@ -160,6 +167,13 @@ static void handle_init(const char* json, uint32_t len,
     std::string dll_path = resolve_dll_path(base_path, mod);
     fprintf(stderr, "[Protocol] init: dll_path = %s\n", dll_path.c_str());
 
+    // Set global base_path and mod name BEFORE DLL init so the utility
+    // interface can use them for file enumeration during XML loading.
+    g_basePath = base_path;
+    g_modName = mod;
+    fprintf(stderr, "[Protocol] init: g_basePath = %s\n", g_basePath.c_str());
+    fprintf(stderr, "[Protocol] init: g_modName = %s\n", g_modName.c_str());
+
     // Step 1: Load the DLL and resolve exports
     if (!dll_loader.load(dll_path)) {
         auto err = build_error("init: failed to load CvGameCoreDLL.dll");
@@ -185,7 +199,20 @@ static void handle_init(const char* json, uint32_t len,
         return;
     }
 
-    // Full success
+    // Step 4: Orchestrate XML data loading via CvXMLLoadUtility.
+    // This creates a CvXMLLoadUtility instance and calls all loading
+    // methods in the correct sequence. Expected to fail/crash on first
+    // attempt — we log everything for debugging in Tasks 8-9.
+    fprintf(stderr, "[Protocol] init: starting XML data loading...\n");
+    bool xml_ok = dll_loader.load_xml_data();
+    if (!xml_ok) {
+        fprintf(stderr, "[Protocol] init: XML loading failed (expected at this stage)\n");
+        // Non-fatal: CvGlobals::init() succeeded, XML loading is incremental
+    } else {
+        fprintf(stderr, "[Protocol] init: XML loading completed successfully\n");
+    }
+
+    // Report success (even if XML loading partially failed — init() worked)
     auto resp = build_response("ok");
     server.send_message(resp.data(), static_cast<uint32_t>(resp.size()));
 }

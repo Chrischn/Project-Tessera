@@ -2,9 +2,10 @@
 // File:              dll_loader.cpp
 // Author(s):         Chrischn89
 // Description:
-//   Loads CvGameCoreDLL.dll at runtime using LoadLibrary, resolves the three
-//   critical exports (getInstance, setDLLIFace, init), and wires TesseraHost's
-//   stub interfaces into the DLL's gDLL pointer.
+//   Loads CvGameCoreDLL.dll at runtime using LoadLibrary, resolves exports
+//   (getInstance, setDLLIFace, init, CvXMLLoadUtility methods), wires
+//   TesseraHost's stub interfaces into the DLL's gDLL pointer, and
+//   orchestrates XML data loading via CvXMLLoadUtility.
 //
 // License:
 //   Released under the terms of the GNU General Public License version 3.0
@@ -12,9 +13,10 @@
 
 #include "dll_loader.h"
 #include <cstdio>
+#include <cstring>
 
 // ---------------------------------------------------------------------------
-// load — LoadLibrary + resolve all three exports
+// load — LoadLibrary + resolve all exports (CvGlobals + CvXMLLoadUtility)
 // ---------------------------------------------------------------------------
 bool DllLoader::load(const std::string& dll_path) {
     fprintf(stderr, "[DLL] Loading: %s\n", dll_path.c_str());
@@ -33,7 +35,9 @@ bool DllLoader::load(const std::string& dll_path) {
         return false;
     }
 
-    // Resolve exports by mangled names from dumpbin /exports
+    // -----------------------------------------------------------------------
+    // Resolve CvGlobals exports (mangled names from dumpbin /exports)
+    // -----------------------------------------------------------------------
     m_pfnGetInstance = (GetInstanceFn)GetProcAddress(m_hDll,
         "?getInstance@CvGlobals@@SAAAV1@XZ");
 
@@ -44,13 +48,73 @@ bool DllLoader::load(const std::string& dll_path) {
         "?init@CvGlobals@@QAEXXZ");
 
     if (!m_pfnGetInstance || !m_pfnSetDLLIFace || !m_pfnInit) {
-        fprintf(stderr, "[DLL ERROR] Failed to resolve exports:\n");
+        fprintf(stderr, "[DLL ERROR] Failed to resolve CvGlobals exports:\n");
         fprintf(stderr, "  getInstance: %s\n", m_pfnGetInstance ? "OK" : "MISSING");
         fprintf(stderr, "  setDLLIFace: %s\n", m_pfnSetDLLIFace ? "OK" : "MISSING");
         fprintf(stderr, "  init:        %s\n", m_pfnInit ? "OK" : "MISSING");
         FreeLibrary(m_hDll);
         m_hDll = nullptr;
         return false;
+    }
+
+    fprintf(stderr, "[DLL] CvGlobals exports resolved OK\n");
+
+    // -----------------------------------------------------------------------
+    // Resolve CvXMLLoadUtility exports
+    // -----------------------------------------------------------------------
+    m_pfnXmlCtor = (XmlCtorFn)GetProcAddress(m_hDll,
+        "??0CvXMLLoadUtility@@QAE@XZ");
+    m_pfnXmlDtor = (XmlDtorFn)GetProcAddress(m_hDll,
+        "??1CvXMLLoadUtility@@QAE@XZ");
+    m_pfnXmlCreateFXml = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?CreateFXml@CvXMLLoadUtility@@QAE_NXZ");
+    m_pfnXmlDestroyFXml = (XmlVoidFn)GetProcAddress(m_hDll,
+        "?DestroyFXml@CvXMLLoadUtility@@QAEXXZ");
+    m_pfnSetGlobalDefines = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?SetGlobalDefines@CvXMLLoadUtility@@QAE_NXZ");
+    m_pfnSetGlobalTypes = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?SetGlobalTypes@CvXMLLoadUtility@@QAE_NXZ");
+    m_pfnSetGlobalArtDefines = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?SetGlobalArtDefines@CvXMLLoadUtility@@QAE_NXZ");
+    m_pfnLoadBasicInfos = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?LoadBasicInfos@CvXMLLoadUtility@@QAE_NXZ");
+    m_pfnLoadPreMenuGlobals = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?LoadPreMenuGlobals@CvXMLLoadUtility@@QAE_NXZ");
+    m_pfnSetPostGlobalsGlobalDefines = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?SetPostGlobalsGlobalDefines@CvXMLLoadUtility@@QAE_NXZ");
+    m_pfnSetupGlobalLandscapeInfo = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?SetupGlobalLandscapeInfo@CvXMLLoadUtility@@QAE_NXZ");
+    m_pfnLoadPostMenuGlobals = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?LoadPostMenuGlobals@CvXMLLoadUtility@@QAE_NXZ");
+    m_pfnLoadGlobalText = (XmlBoolFn)GetProcAddress(m_hDll,
+        "?LoadGlobalText@CvXMLLoadUtility@@QAE_NXZ");
+
+    // Check all XML exports resolved
+    bool xml_ok = m_pfnXmlCtor && m_pfnXmlDtor && m_pfnXmlCreateFXml
+        && m_pfnXmlDestroyFXml && m_pfnSetGlobalDefines && m_pfnSetGlobalTypes
+        && m_pfnSetGlobalArtDefines && m_pfnLoadBasicInfos
+        && m_pfnLoadPreMenuGlobals && m_pfnSetPostGlobalsGlobalDefines
+        && m_pfnSetupGlobalLandscapeInfo && m_pfnLoadPostMenuGlobals
+        && m_pfnLoadGlobalText;
+
+    if (!xml_ok) {
+        fprintf(stderr, "[DLL WARNING] Some CvXMLLoadUtility exports missing:\n");
+        fprintf(stderr, "  Ctor:                     %s\n", m_pfnXmlCtor ? "OK" : "MISSING");
+        fprintf(stderr, "  Dtor:                     %s\n", m_pfnXmlDtor ? "OK" : "MISSING");
+        fprintf(stderr, "  CreateFXml:               %s\n", m_pfnXmlCreateFXml ? "OK" : "MISSING");
+        fprintf(stderr, "  DestroyFXml:              %s\n", m_pfnXmlDestroyFXml ? "OK" : "MISSING");
+        fprintf(stderr, "  SetGlobalDefines:         %s\n", m_pfnSetGlobalDefines ? "OK" : "MISSING");
+        fprintf(stderr, "  SetGlobalTypes:           %s\n", m_pfnSetGlobalTypes ? "OK" : "MISSING");
+        fprintf(stderr, "  SetGlobalArtDefines:      %s\n", m_pfnSetGlobalArtDefines ? "OK" : "MISSING");
+        fprintf(stderr, "  LoadBasicInfos:           %s\n", m_pfnLoadBasicInfos ? "OK" : "MISSING");
+        fprintf(stderr, "  LoadPreMenuGlobals:       %s\n", m_pfnLoadPreMenuGlobals ? "OK" : "MISSING");
+        fprintf(stderr, "  SetPostGlobalsGlobalDef:  %s\n", m_pfnSetPostGlobalsGlobalDefines ? "OK" : "MISSING");
+        fprintf(stderr, "  SetupGlobalLandscapeInfo: %s\n", m_pfnSetupGlobalLandscapeInfo ? "OK" : "MISSING");
+        fprintf(stderr, "  LoadPostMenuGlobals:      %s\n", m_pfnLoadPostMenuGlobals ? "OK" : "MISSING");
+        fprintf(stderr, "  LoadGlobalText:           %s\n", m_pfnLoadGlobalText ? "OK" : "MISSING");
+        // Non-fatal: we can still use CvGlobals, just can't load XML
+    } else {
+        fprintf(stderr, "[DLL] CvXMLLoadUtility exports resolved OK\n");
     }
 
     fprintf(stderr, "[DLL] All exports resolved successfully\n");
@@ -105,6 +169,141 @@ bool DllLoader::initialize() {
 }
 
 // ---------------------------------------------------------------------------
+// load_xml_data — orchestrate CvXMLLoadUtility XML loading sequence
+// ---------------------------------------------------------------------------
+bool DllLoader::load_xml_data() {
+    if (!m_hDll) {
+        fprintf(stderr, "[DLL ERROR] load_xml_data called before DLL loaded\n");
+        return false;
+    }
+
+    // Verify all XML function pointers are resolved
+    if (!m_pfnXmlCtor || !m_pfnXmlDtor || !m_pfnXmlCreateFXml
+        || !m_pfnXmlDestroyFXml) {
+        fprintf(stderr, "[DLL ERROR] CvXMLLoadUtility exports not resolved\n");
+        return false;
+    }
+
+    fprintf(stderr, "[DLL] === XML Loading Orchestration Begin ===\n");
+
+    // CvXMLLoadUtility class layout from SDK header:
+    //   FXml*            m_pFXml           (4 bytes)
+    //   FXmlSchemaCache* m_pSchemaCache    (4 bytes)
+    //   int              m_iCurProgressStep(4 bytes)
+    //   ProgressCB       m_pCBFxn          (4 bytes)
+    // Total: 16 bytes of data members. No vtable (no virtual methods).
+    // Use 256 bytes for generous safety margin.
+    static const size_t XML_UTIL_SIZE = 256;
+    char xmlUtilBuf[XML_UTIL_SIZE];
+    memset(xmlUtilBuf, 0, XML_UTIL_SIZE);
+
+    // --- Construct CvXMLLoadUtility ---
+    fprintf(stderr, "[DLL] Constructing CvXMLLoadUtility (%zu byte buffer)...\n", XML_UTIL_SIZE);
+    __try {
+        m_pfnXmlCtor(xmlUtilBuf);
+        fprintf(stderr, "[DLL] CvXMLLoadUtility constructed OK\n");
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        fprintf(stderr, "[DLL ERROR] CvXMLLoadUtility constructor crashed: 0x%08X\n",
+                GetExceptionCode());
+        return false;
+    }
+
+    // --- Create internal FXml parser ---
+    fprintf(stderr, "[DLL] Calling CreateFXml()...\n");
+    bool ok = false;
+    __try {
+        ok = m_pfnXmlCreateFXml(xmlUtilBuf);
+        fprintf(stderr, "[DLL] CreateFXml() returned %s\n", ok ? "true" : "false");
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        fprintf(stderr, "[DLL ERROR] CreateFXml() crashed: 0x%08X\n",
+                GetExceptionCode());
+        // Try to destruct before returning
+        __try { m_pfnXmlDtor(xmlUtilBuf); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        return false;
+    }
+
+    if (!ok) {
+        fprintf(stderr, "[DLL ERROR] CreateFXml() returned false — aborting XML loading\n");
+        __try { m_pfnXmlDtor(xmlUtilBuf); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        return false;
+    }
+
+    // --- Loading sequence: each step with SEH protection ---
+    // Helper macro for repetitive SEH-wrapped calls
+    #define XML_LOAD_STEP(name, fnPtr) \
+        do { \
+            fprintf(stderr, "[DLL] Loading %s...\n", name); \
+            __try { \
+                bool step_ok = (fnPtr)(xmlUtilBuf); \
+                fprintf(stderr, "[DLL] %s returned %s\n", name, step_ok ? "true" : "false"); \
+            } \
+            __except (EXCEPTION_EXECUTE_HANDLER) { \
+                fprintf(stderr, "[DLL ERROR] %s crashed: 0x%08X\n", name, GetExceptionCode()); \
+                goto cleanup; \
+            } \
+        } while(0)
+
+    if (m_pfnSetGlobalDefines)
+        XML_LOAD_STEP("SetGlobalDefines", m_pfnSetGlobalDefines);
+
+    if (m_pfnSetGlobalTypes)
+        XML_LOAD_STEP("SetGlobalTypes", m_pfnSetGlobalTypes);
+
+    if (m_pfnSetGlobalArtDefines)
+        XML_LOAD_STEP("SetGlobalArtDefines", m_pfnSetGlobalArtDefines);
+
+    if (m_pfnLoadBasicInfos)
+        XML_LOAD_STEP("LoadBasicInfos", m_pfnLoadBasicInfos);
+
+    if (m_pfnLoadPreMenuGlobals)
+        XML_LOAD_STEP("LoadPreMenuGlobals", m_pfnLoadPreMenuGlobals);
+
+    if (m_pfnSetPostGlobalsGlobalDefines)
+        XML_LOAD_STEP("SetPostGlobalsGlobalDefines", m_pfnSetPostGlobalsGlobalDefines);
+
+    if (m_pfnSetupGlobalLandscapeInfo)
+        XML_LOAD_STEP("SetupGlobalLandscapeInfo", m_pfnSetupGlobalLandscapeInfo);
+
+    if (m_pfnLoadPostMenuGlobals)
+        XML_LOAD_STEP("LoadPostMenuGlobals", m_pfnLoadPostMenuGlobals);
+
+    if (m_pfnLoadGlobalText)
+        XML_LOAD_STEP("LoadGlobalText", m_pfnLoadGlobalText);
+
+    #undef XML_LOAD_STEP
+
+    fprintf(stderr, "[DLL] === XML Loading Sequence Complete ===\n");
+
+cleanup:
+    // --- Destroy FXml parser ---
+    fprintf(stderr, "[DLL] Calling DestroyFXml()...\n");
+    __try {
+        m_pfnXmlDestroyFXml(xmlUtilBuf);
+        fprintf(stderr, "[DLL] DestroyFXml() completed\n");
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        fprintf(stderr, "[DLL ERROR] DestroyFXml() crashed: 0x%08X\n",
+                GetExceptionCode());
+    }
+
+    // --- Destruct CvXMLLoadUtility ---
+    fprintf(stderr, "[DLL] Destructing CvXMLLoadUtility...\n");
+    __try {
+        m_pfnXmlDtor(xmlUtilBuf);
+        fprintf(stderr, "[DLL] CvXMLLoadUtility destructed OK\n");
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        fprintf(stderr, "[DLL ERROR] CvXMLLoadUtility destructor crashed: 0x%08X\n",
+                GetExceptionCode());
+    }
+
+    fprintf(stderr, "[DLL] === XML Loading Orchestration End ===\n");
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // unload — free the DLL and reset all state
 // ---------------------------------------------------------------------------
 void DllLoader::unload() {
@@ -117,4 +316,19 @@ void DllLoader::unload() {
     m_pfnGetInstance  = nullptr;
     m_pfnSetDLLIFace  = nullptr;
     m_pfnInit         = nullptr;
+
+    // Reset XML function pointers
+    m_pfnXmlCtor                     = nullptr;
+    m_pfnXmlDtor                     = nullptr;
+    m_pfnXmlCreateFXml               = nullptr;
+    m_pfnXmlDestroyFXml              = nullptr;
+    m_pfnSetGlobalDefines            = nullptr;
+    m_pfnSetGlobalTypes              = nullptr;
+    m_pfnSetGlobalArtDefines         = nullptr;
+    m_pfnLoadBasicInfos              = nullptr;
+    m_pfnLoadPreMenuGlobals          = nullptr;
+    m_pfnSetPostGlobalsGlobalDefines = nullptr;
+    m_pfnSetupGlobalLandscapeInfo    = nullptr;
+    m_pfnLoadPostMenuGlobals         = nullptr;
+    m_pfnLoadGlobalText              = nullptr;
 }

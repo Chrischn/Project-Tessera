@@ -2,18 +2,113 @@
 // File:              iface_utility.cpp
 // Author(s):         Chrischn89
 // Description:
-//   Stub implementation of CvDLLUtilityIFaceBase. All methods log and return
-//   safe defaults. Real implementations replace stubs incrementally.
+//   Implementation of CvDLLUtilityIFaceBase. Core methods (memory, logging,
+//   file enumeration, text, caching) are implemented for XML loading support.
+//   Remaining methods are stubs that log and return safe defaults.
 //
 // License:
 //   Released under the terms of the GNU General Public License version 3.0
 // =============================================================================
+
+// Include windows.h BEFORE iface_utility.h to avoid POINT redefinition,
+// then undef macros that clash with our virtual method names.
+#include <windows.h>
+#ifdef MessageBox
+#undef MessageBox
+#endif
 
 #include "iface_utility.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cstdarg>
+#include <string>
+#include <algorithm>
+
+// ---------------------------------------------------------------------------
+// Global base path and mod name — set by message_protocol.cpp before DLL init
+// ---------------------------------------------------------------------------
+extern std::string g_basePath;
+extern std::string g_modName;
+
+// ---------------------------------------------------------------------------
+// Helper: enumerate files matching a Win32 glob pattern
+// ---------------------------------------------------------------------------
+static void enumerate_files_impl(std::vector<CvString>& files,
+                                  const std::string& base_dir,
+                                  const char* szPattern) {
+    if (!szPattern || !szPattern[0]) return;
+
+    // The DLL passes patterns like "xml\\GameInfo\\*.xml"
+    // We resolve them relative to the Assets directory.
+    std::string full_pattern = base_dir;
+    if (!full_pattern.empty() && full_pattern.back() != '\\' && full_pattern.back() != '/')
+        full_pattern += '\\';
+    full_pattern += szPattern;
+
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(full_pattern.c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    // Extract directory prefix from the pattern (everything before the last backslash)
+    std::string dir_prefix = szPattern;
+    size_t last_sep = dir_prefix.find_last_of("\\/");
+    if (last_sep != std::string::npos)
+        dir_prefix = dir_prefix.substr(0, last_sep + 1);
+    else
+        dir_prefix.clear();
+
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            // Return path relative to Assets/ (matching what the DLL expects)
+            std::string rel_path = dir_prefix + fd.cFileName;
+            files.push_back(rel_path);
+        }
+    } while (FindNextFileA(hFind, &fd));
+
+    FindClose(hFind);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: recursively enumerate files in a directory matching an extension
+// ---------------------------------------------------------------------------
+static void enumerate_module_files_recursive(std::vector<CvString>& files,
+                                              const std::string& dir,
+                                              const std::string& ext,
+                                              bool bSearchSubdirs) {
+    std::string search = dir + "\\*";
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(search.c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (fd.cFileName[0] == '.') continue;
+
+        std::string full = dir + "\\" + fd.cFileName;
+
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (bSearchSubdirs) {
+                enumerate_module_files_recursive(files, full, ext, bSearchSubdirs);
+            }
+        } else {
+            // Check extension match
+            std::string fname = fd.cFileName;
+            if (fname.size() >= ext.size()) {
+                std::string file_ext = fname.substr(fname.size() - ext.size());
+                // Case-insensitive comparison
+                std::string ext_lower = ext;
+                std::string fext_lower = file_ext;
+                std::transform(ext_lower.begin(), ext_lower.end(), ext_lower.begin(), ::tolower);
+                std::transform(fext_lower.begin(), fext_lower.end(), fext_lower.begin(), ::tolower);
+                if (ext_lower == fext_lower) {
+                    files.push_back(full);
+                }
+            }
+        }
+    } while (FindNextFileA(hFind, &fd));
+
+    FindClose(hFind);
+}
 
 // =============================================================================
 // Sub-interface singleton externs (defined in their own iface_*.cpp files)
@@ -41,71 +136,58 @@ class CvDLLUtilityIFaceImpl : public CvDLLUtilityIFaceBase
 {
 public:
 	// =========================================================================
-	// Sub-interface accessors
+	// Sub-interface accessors — intentionally quiet (called very frequently)
 	// =========================================================================
 
 	CvDLLEntityIFaceBase* getEntityIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getEntityIFace\n");
 		return g_pEntityIFace;
 	}
 
 	CvDLLInterfaceIFaceBase* getInterfaceIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getInterfaceIFace\n");
 		return g_pInterfaceIFace;
 	}
 
 	CvDLLEngineIFaceBase* getEngineIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getEngineIFace\n");
 		return g_pEngineIFace;
 	}
 
 	CvDLLIniParserIFaceBase* getIniParserIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getIniParserIFace\n");
 		return g_pIniParserIFace;
 	}
 
 	CvDLLSymbolIFaceBase* getSymbolIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getSymbolIFace\n");
 		return g_pSymbolIFace;
 	}
 
 	CvDLLFeatureIFaceBase* getFeatureIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getFeatureIFace\n");
 		return g_pFeatureIFace;
 	}
 
 	CvDLLRouteIFaceBase* getRouteIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getRouteIFace\n");
 		return g_pRouteIFace;
 	}
 
 	CvDLLPlotBuilderIFaceBase* getPlotBuilderIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getPlotBuilderIFace\n");
 		return g_pPlotBuilderIFace;
 	}
 
 	CvDLLRiverIFaceBase* getRiverIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getRiverIFace\n");
 		return g_pRiverIFace;
 	}
 
 	CvDLLFAStarIFaceBase* getFAStarIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getFAStarIFace\n");
 		return g_pFAStarIFace;
 	}
 
 	CvDLLXmlIFaceBase* getXMLIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getXMLIFace\n");
 		return g_pXmlIFace;
 	}
 
 	CvDLLFlagEntityIFaceBase* getFlagEntityIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getFlagEntityIFace\n");
 		return g_pFlagEntityIFace;
 	}
 
 	CvDLLPythonIFaceBase* getPythonIFace() override {
-		fprintf(stderr, "[UTILITY STUB] getPythonIFace\n");
 		return g_pPythonIFace;
 	}
 
@@ -114,43 +196,44 @@ public:
 	// =========================================================================
 
 	void delMem(void* p) override {
-		fprintf(stderr, "[UTILITY STUB] delMem(%p)\n", p);
+		// Intentionally quiet — memory ops are high-frequency
 		free(p);
 	}
 
 	void* newMem(size_t size) override {
-		fprintf(stderr, "[UTILITY STUB] newMem(%zu)\n", size);
+		// Intentionally quiet — memory ops are high-frequency
 		return malloc(size);
 	}
 
 	void delMem(void* p, const char* pcFile, int iLine) override {
-		fprintf(stderr, "[UTILITY STUB] delMem(%p, %s:%d)\n", p, pcFile ? pcFile : "", iLine);
+		// Intentionally quiet — memory ops are high-frequency
 		free(p);
 	}
 
 	void* newMem(size_t size, const char* pcFile, int iLine) override {
-		fprintf(stderr, "[UTILITY STUB] newMem(%zu, %s:%d)\n", size, pcFile ? pcFile : "", iLine);
+		// Intentionally quiet — memory ops are high-frequency
 		return malloc(size);
 	}
 
 	void delMemArray(void* p, const char* pcFile, int iLine) override {
-		fprintf(stderr, "[UTILITY STUB] delMemArray(%p, %s:%d)\n", p, pcFile ? pcFile : "", iLine);
+		// Intentionally quiet — memory ops are high-frequency
 		free(p);
 	}
 
 	void* newMemArray(size_t size, const char* pcFile, int iLine) override {
-		fprintf(stderr, "[UTILITY STUB] newMemArray(%zu, %s:%d)\n", size, pcFile ? pcFile : "", iLine);
+		// Intentionally quiet — memory ops are high-frequency
 		return malloc(size);
 	}
 
 	void* reallocMem(void* a, unsigned int uiBytes, const char* pcFile, int iLine) override {
-		fprintf(stderr, "[UTILITY STUB] reallocMem(%p, %u, %s:%d)\n", a, uiBytes, pcFile ? pcFile : "", iLine);
+		// Intentionally quiet — memory ops are high-frequency
 		return realloc(a, uiBytes);
 	}
 
 	unsigned int memSize(void* a) override {
-		fprintf(stderr, "[UTILITY STUB] memSize\n");
-		return 0;
+		// _msize is MSVC-specific; returns allocated block size
+		if (!a) return 0;
+		return static_cast<unsigned int>(_msize(a));
 	}
 
 	// =========================================================================
@@ -158,17 +241,17 @@ public:
 	// =========================================================================
 
 	void clearVector(std::vector<int>& vec) override {
-		fprintf(stderr, "[UTILITY STUB] clearVector(int)\n");
+		// Intentionally quiet — called frequently during XML loading
 		vec.clear();
 	}
 
 	void clearVector(std::vector<byte>& vec) override {
-		fprintf(stderr, "[UTILITY STUB] clearVector(byte)\n");
+		// Intentionally quiet — called frequently during XML loading
 		vec.clear();
 	}
 
 	void clearVector(std::vector<float>& vec) override {
-		fprintf(stderr, "[UTILITY STUB] clearVector(float)\n");
+		// Intentionally quiet — called frequently during XML loading
 		vec.clear();
 	}
 
@@ -259,16 +342,18 @@ public:
 	}
 
 	int getCurrentLanguage() const override {
-		fprintf(stderr, "[UTILITY STUB] getCurrentLanguage\n");
+		// 0 = English. Intentionally quiet — called frequently during XML loading.
 		return 0;
 	}
 
 	void setCurrentLanguage(int iNewLanguage) override {
-		fprintf(stderr, "[UTILITY STUB] setCurrentLanguage(%d)\n", iNewLanguage);
+		fprintf(stderr, "[UTILITY] setCurrentLanguage(%d)\n", iNewLanguage);
 	}
 
 	bool isModularXMLLoading() const override {
-		fprintf(stderr, "[UTILITY STUB] isModularXMLLoading\n");
+		// Return false for base BTS — modular loading is a mod feature.
+		// This prevents the DLL from calling enumerateModuleFiles during
+		// initial XML loading, simplifying our first pass.
 		return false;
 	}
 
@@ -464,7 +549,7 @@ public:
 	// =========================================================================
 
 	void initGlobals() override {
-		fprintf(stderr, "[UTILITY STUB] initGlobals\n");
+		fprintf(stderr, "[UTILITY] initGlobals — called by CvGlobals::init()\n");
 	}
 
 	void uninitGlobals() override {
@@ -580,8 +665,8 @@ public:
 	}
 
 	int getAudioTagIndex(const TCHAR* szTag, int iScriptType) override {
-		fprintf(stderr, "[UTILITY STUB] getAudioTagIndex: %s\n", szTag ? szTag : "(null)");
-		return 0;
+		// Return -1 (no audio tag) — intentionally quiet, called during XML loading
+		return -1;
 	}
 
 	void DoSound(int iScriptId) override {
@@ -745,22 +830,22 @@ public:
 	// =========================================================================
 
 	CvWString getText(CvWString szIDTag, ...) override {
-		fprintf(stderr, "[UTILITY STUB] getText\n");
-		return L"";
+		// Return the tag itself as placeholder text.
+		// Intentionally quiet — called many times during XML loading.
+		return szIDTag;
 	}
 
 	CvWString getObjectText(CvWString szIDTag, uint uiForm, bool bNoSubs) override {
-		fprintf(stderr, "[UTILITY STUB] getObjectText\n");
-		return L"";
+		// Return the tag itself as placeholder text.
+		return szIDTag;
 	}
 
 	void addText(const TCHAR* szIDTag, const wchar* szString, const wchar* szGender, const wchar* szPlural) override {
-		fprintf(stderr, "[UTILITY STUB] addText: %s\n", szIDTag ? szIDTag : "(null)");
+		// Intentionally quiet — LoadGlobalText calls this for every text entry
 	}
 
 	uint getNumForms(CvWString szIDTag) override {
-		fprintf(stderr, "[UTILITY STUB] getNumForms\n");
-		return 0;
+		return 1;
 	}
 
 	// =========================================================================
@@ -832,8 +917,9 @@ public:
 	}
 
 	bool isGameInitializing() override {
-		fprintf(stderr, "[UTILITY STUB] isGameInitializing\n");
-		return false;
+		// Return true during XML loading — the DLL uses this to gate
+		// certain initialization behavior.
+		return true;
 	}
 
 	// =========================================================================
@@ -841,12 +927,50 @@ public:
 	// =========================================================================
 
 	void enumerateFiles(std::vector<CvString>& files, const char* szPattern) override {
-		fprintf(stderr, "[UTILITY STUB] enumerateFiles: %s\n", szPattern ? szPattern : "(null)");
+		fprintf(stderr, "[UTILITY] enumerateFiles: %s\n", szPattern ? szPattern : "(null)");
+		if (!szPattern) return;
+
+		// Build the Assets directory path.
+		// Try mod Assets first (if mod is active), then base BTS Assets.
+		std::string assets_dir;
+
+		if (!g_modName.empty()) {
+			assets_dir = g_basePath + "\\Beyond the Sword\\Mods\\" + g_modName + "\\Assets";
+			size_t before = files.size();
+			enumerate_files_impl(files, assets_dir, szPattern);
+			fprintf(stderr, "[UTILITY]   mod dir: %s (%zu files)\n",
+				assets_dir.c_str(), files.size() - before);
+		}
+
+		// Base BTS Assets
+		assets_dir = g_basePath + "\\Beyond the Sword\\Assets";
+		size_t before = files.size();
+		enumerate_files_impl(files, assets_dir, szPattern);
+		fprintf(stderr, "[UTILITY]   base dir: %s (%zu files)\n",
+			assets_dir.c_str(), files.size() - before);
+
+		fprintf(stderr, "[UTILITY]   total files found: %zu\n", files.size());
 	}
 
 	void enumerateModuleFiles(std::vector<CvString>& aszFiles, const CvString& refcstrRootDirectory, const CvString& refcstrModularDirectory, const CvString& refcstrExtension, bool bSearchSubdirectories) override {
-		fprintf(stderr, "[UTILITY STUB] enumerateModuleFiles: %s / %s\n",
-			refcstrRootDirectory.c_str(), refcstrExtension.c_str());
+		fprintf(stderr, "[UTILITY] enumerateModuleFiles: root=%s modDir=%s ext=%s subdirs=%d\n",
+			refcstrRootDirectory.c_str(), refcstrModularDirectory.c_str(),
+			refcstrExtension.c_str(), bSearchSubdirectories);
+
+		// Build the full path to the modular directory
+		std::string mod_dir;
+		if (!g_modName.empty()) {
+			mod_dir = g_basePath + "\\Beyond the Sword\\Mods\\" + g_modName
+				+ "\\Assets\\" + std::string(refcstrModularDirectory);
+		} else {
+			mod_dir = g_basePath + "\\Beyond the Sword\\Assets\\"
+				+ std::string(refcstrModularDirectory);
+		}
+
+		enumerate_module_files_recursive(aszFiles, mod_dir,
+			refcstrExtension, bSearchSubdirectories);
+
+		fprintf(stderr, "[UTILITY]   module files found: %zu\n", aszFiles.size());
 	}
 
 	// =========================================================================
@@ -954,8 +1078,15 @@ public:
 	// =========================================================================
 
 	const char* getModName(bool bFullPath) const override {
-		fprintf(stderr, "[UTILITY STUB] getModName\n");
-		return "";
+		if (g_modName.empty()) return "";
+
+		if (bFullPath) {
+			// Return full path: "Mods/<modname>/"
+			static std::string fullModPath;
+			fullModPath = "Mods\\" + g_modName + "\\";
+			return fullModPath.c_str();
+		}
+		return g_modName.c_str();
 	}
 
 	bool hasSkippedSaveChecksum() const override {
