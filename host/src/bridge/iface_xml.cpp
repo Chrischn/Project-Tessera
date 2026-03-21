@@ -42,6 +42,185 @@ struct FXmlSchemaCache {
 };
 
 // =============================================================================
+// VS2003 CRT allocator — we must use the DLL's own CRT (msvcr71.dll) for
+// std::string heap allocations, because the VS2003 string destructor will
+// call VS2003's free() on the buffer. Using our VS2022 malloc would crash.
+// =============================================================================
+
+typedef void* (__cdecl *MallocFn)(size_t);
+typedef void  (__cdecl *FreeFn)(void*);
+static MallocFn g_vs2003_malloc = nullptr;
+static FreeFn   g_vs2003_free = nullptr;
+
+static void initVS2003Allocator() {
+	if (g_vs2003_malloc) return;  // Already initialized
+
+	// msvcr71.dll should already be loaded (CvGameCoreDLL.dll depends on it)
+	HMODULE hCrt = GetModuleHandleA("msvcr71.dll");
+	if (!hCrt) {
+		fprintf(stderr, "[XML WARNING] msvcr71.dll not found — falling back to our malloc\n");
+		g_vs2003_malloc = &malloc;
+		g_vs2003_free = &free;
+		return;
+	}
+
+	g_vs2003_malloc = (MallocFn)GetProcAddress(hCrt, "malloc");
+	g_vs2003_free = (FreeFn)GetProcAddress(hCrt, "free");
+
+	if (!g_vs2003_malloc || !g_vs2003_free) {
+		fprintf(stderr, "[XML WARNING] Could not resolve msvcr71 malloc/free — falling back\n");
+		g_vs2003_malloc = &malloc;
+		g_vs2003_free = &free;
+		return;
+	}
+
+	fprintf(stderr, "[XML] VS2003 allocator (msvcr71.dll) initialized OK\n");
+}
+
+static void* vs2003_malloc(size_t size) {
+	initVS2003Allocator();
+	return g_vs2003_malloc(size);
+}
+
+// =============================================================================
+// VS2003 std::string raw memory writer
+//
+// MSVC 7.1 (VS2003) std::string layout on 32-bit:
+//   _String_val base class contains _Alval (allocator, 4 bytes padded)
+//   Then:
+//     offset  0: _Alval  (4 bytes — padded empty allocator from base)
+//     offset  4: _Bx     (16 bytes — union { char _Buf[16]; char* _Ptr; })
+//     offset 20: _Mysize (4 bytes)
+//     offset 24: _Myres  (4 bytes)
+//     Total: 28 bytes
+//
+// SSO mode (_Myres <= 15): string data in _Bx._Buf (offset 4), null-terminated
+// Heap mode (_Myres > 15): _Bx._Ptr (offset 4) points to heap buffer
+//
+// We CANNOT use operator= because our VS2022 allocator would try to
+// free/realloc buffers allocated by VS2003's msvcr71.dll.
+// =============================================================================
+
+// These offsets are determined empirically. If the DLL was compiled with
+// VS2003 using Dinkumware STL without allocator padding, the layout is:
+//   offset 0:  _Bx (16 bytes)
+//   offset 16: _Mysize (4 bytes)
+//   offset 20: _Myres (4 bytes)
+// If the allocator adds 4 bytes at the beginning, shift all by 4.
+// The correct offsets are validated by checking that _Myres = 15 for a
+// default-constructed string passed from the DLL.
+// The raw byte dump shows:
+//   offset 0-3: CD CD CD CD (allocator, uninitialized in debug)
+//   offset 4:   00 (SSO buffer start, null terminator for empty string)
+//   offset 20:  00 00 00 00 (_Mysize = 0)
+//   offset 24:  0F 00 00 00 (_Myres = 15)
+//
+// BUT using offset 4 for _Bx causes hard crashes. This suggests the
+// DLL was compiled in Release mode where the allocator IS optimized away
+// via EBO, making the actual runtime layout = offset 0 for _Bx.
+// The 0xCDCDCDCD at offset 0 is just OUR debug fill from stack init,
+// overwritten by the DLL when it constructs the string.
+//
+// Use offset-0 layout (matching Release-compiled DLL behavior).
+static const size_t VS2003_BX_OFFSET = 0;
+static const size_t VS2003_MYSIZE_OFFSET = 16;
+static const size_t VS2003_MYRES_OFFSET = 20;
+
+static void writeVS2003String(char* raw, const char* text) {
+	size_t len = text ? strlen(text) : 0;
+	char* bx = raw + VS2003_BX_OFFSET;
+	size_t* pMysize = reinterpret_cast<size_t*>(raw + VS2003_MYSIZE_OFFSET);
+	size_t* pMyres = reinterpret_cast<size_t*>(raw + VS2003_MYRES_OFFSET);
+	size_t myres = *pMyres;
+
+	if (len <= 15) {
+		if (myres > 15) {
+			// Currently heap mode — write to heap buffer
+			char* ptr = *reinterpret_cast<char**>(bx);
+			memcpy(ptr, text, len);
+			ptr[len] = '\0';
+		} else {
+			// SSO mode — write to inline buffer at _Bx offset
+			memcpy(bx, text, len);
+			bx[len] = '\0';
+		}
+		*pMysize = len;
+	} else if (len <= myres) {
+		// Fits in existing heap buffer
+		char* ptr = *reinterpret_cast<char**>(bx);
+		memcpy(ptr, text, len);
+		ptr[len] = '\0';
+		*pMysize = len;
+	} else {
+		// Need bigger buffer. The DLL passed a default-constructed or small string.
+		// Allocate a new heap buffer. We use malloc (our CRT), which means the DLL
+		// must NOT try to free this buffer with its VS2003 free(). In practice,
+		// the DLL copies the string content elsewhere and the local string goes
+		// out of scope without freeing (or it leaks — acceptable for MVP).
+		//
+		// If currently in SSO mode (myres <= 15), switch to heap mode.
+		// If currently in heap mode but too small, replace the pointer.
+		size_t newres = len + 16; // Extra space to avoid repeated reallocs
+		char* newbuf = static_cast<char*>(vs2003_malloc(newres + 1));
+		if (!newbuf) {
+			fprintf(stderr, "[XML ERROR] malloc failed for string of size %zu\n", len);
+			return;
+		}
+		memcpy(newbuf, text, len);
+		newbuf[len] = '\0';
+
+		// Set heap pointer at _Bx offset
+		*reinterpret_cast<char**>(bx) = newbuf;
+		*pMysize = len;
+		*pMyres = newres;
+	}
+}
+
+static void writeVS2003WString(char* raw, const wchar_t* text) {
+	size_t len = text ? wcslen(text) : 0;
+	// VS2003 std::wstring layout (32-bit):
+	//   offset  0: _Alval  (4 bytes — padded allocator from base)
+	//   offset  4: _Bx     (16 bytes — union { wchar_t _Buf[8]; wchar_t* _Ptr; })
+	//   offset 20: _Mysize (4 bytes)
+	//   offset 24: _Myres  (4 bytes)
+	// SSO threshold: 7 wchar_t characters (8 * 2 = 16 bytes, minus null)
+	char* bx = raw + VS2003_BX_OFFSET;
+	size_t* pMysize = reinterpret_cast<size_t*>(raw + VS2003_MYSIZE_OFFSET);
+	size_t* pMyres = reinterpret_cast<size_t*>(raw + VS2003_MYRES_OFFSET);
+	size_t myres = *pMyres;
+
+	if (len <= 7) {
+		if (myres > 7) {
+			wchar_t* ptr = *reinterpret_cast<wchar_t**>(bx);
+			memcpy(ptr, text, len * sizeof(wchar_t));
+			ptr[len] = L'\0';
+		} else {
+			wchar_t* buf = reinterpret_cast<wchar_t*>(bx);
+			memcpy(buf, text, len * sizeof(wchar_t));
+			buf[len] = L'\0';
+		}
+		*pMysize = len;
+	} else if (len <= myres) {
+		wchar_t* ptr = *reinterpret_cast<wchar_t**>(bx);
+		memcpy(ptr, text, len * sizeof(wchar_t));
+		ptr[len] = L'\0';
+		*pMysize = len;
+	} else {
+		size_t newres = len + 16;
+		wchar_t* newbuf = static_cast<wchar_t*>(vs2003_malloc((newres + 1) * sizeof(wchar_t)));
+		if (!newbuf) {
+			fprintf(stderr, "[XML ERROR] malloc failed for wstring of size %zu\n", len);
+			return;
+		}
+		memcpy(newbuf, text, len * sizeof(wchar_t));
+		newbuf[len] = L'\0';
+		*reinterpret_cast<wchar_t**>(bx) = newbuf;
+		*pMysize = len;
+		*pMyres = newres;
+	}
+}
+
+// =============================================================================
 // Globals from message_protocol.cpp
 // =============================================================================
 
@@ -343,12 +522,15 @@ public:
 		if (!xml || !xml->loaded) return false;
 
 		pugi::xml_node next = xml->current_node.next_sibling();
-		// Skip non-element nodes (comments, processing instructions, etc.)
 		next = skipNonElements(next);
 
-		if (!next) return false;
+		if (!next) {
+			fprintf(stderr, "[XML] NextSibling: no more siblings after <%s>\n", xml->current_node.name());
+			return false;
+		}
 
 		xml->current_node = next;
+		fprintf(stderr, "[XML] NextSibling -> <%s>\n", next.name());
 		return true;
 	}
 
@@ -368,12 +550,15 @@ public:
 		if (!xml || !xml->loaded) return false;
 
 		pugi::xml_node child = xml->current_node.first_child();
-		// Skip non-element nodes (text nodes, comments, etc.)
 		child = skipNonElements(child);
 
-		if (!child) return false;
+		if (!child) {
+			fprintf(stderr, "[XML] SetToChild: no element children in <%s>\n", xml->current_node.name());
+			return false;
+		}
 
 		xml->current_node = child;
+		fprintf(stderr, "[XML] SetToChild -> <%s>\n", child.name());
 		return true;
 	}
 
@@ -392,10 +577,10 @@ public:
 
 		pugi::xml_node parent = xml->current_node.parent();
 		if (!parent || parent.type() == pugi::node_document) {
-			// Already at document root — going higher would leave DOM
-			// Still set to document element as safe fallback
+			fprintf(stderr, "[XML] SetToParent: already at root from <%s>\n", xml->current_node.name());
 			return false;
 		}
+		fprintf(stderr, "[XML] SetToParent <%s> -> <%s>\n", xml->current_node.name(), parent.name());
 
 		xml->current_node = parent;
 		return true;
@@ -445,7 +630,21 @@ public:
 	bool GetLastNodeValue(FXml* xml, std::string& pszText) override {
 		if (!xml || !xml->loaded) return false;
 		const char* text = getNodeText(xml->current_node);
-		pszText = text;
+		fprintf(stderr, "[XML] GetLastNodeValue(string) <%s> = \"%s\"\n", xml->current_node.name(), text);
+
+		// Dump raw bytes of the incoming string for layout diagnostics
+		{
+			char* raw = reinterpret_cast<char*>(&pszText);
+			fprintf(stderr, "[XML] string raw bytes (first 32): ");
+			for (int i = 0; i < 32; i++) fprintf(stderr, "%02X ", (unsigned char)raw[i]);
+			fprintf(stderr, "\n");
+			fprintf(stderr, "[XML] string layout check: offset16=%u offset20=%u offset24=%u\n",
+				*reinterpret_cast<unsigned*>(raw+16),
+				*reinterpret_cast<unsigned*>(raw+20),
+				*reinterpret_cast<unsigned*>(raw+24));
+		}
+
+		writeVS2003String(reinterpret_cast<char*>(&pszText), text);
 		return true;
 	}
 
@@ -453,15 +652,16 @@ public:
 		if (!xml || !xml->loaded) return false;
 		const char* text = getNodeText(xml->current_node);
 
-		// Convert UTF-8 to wide string using Windows API
-		int len = MultiByteToWideChar(CP_UTF8, 0, text, -1, nullptr, 0);
-		if (len <= 0) {
-			pszText.clear();
+		// Convert UTF-8 to wide string
+		int wlen = MultiByteToWideChar(CP_UTF8, 0, text, -1, nullptr, 0);
+		if (wlen <= 0) {
+			writeVS2003WString(reinterpret_cast<char*>(&pszText), L"");
 			return true;
 		}
-		std::vector<wchar_t> buf(len);
-		MultiByteToWideChar(CP_UTF8, 0, text, -1, buf.data(), len);
-		pszText = buf.data();
+		std::vector<wchar_t> buf(wlen);
+		MultiByteToWideChar(CP_UTF8, 0, text, -1, buf.data(), wlen);
+
+		writeVS2003WString(reinterpret_cast<char*>(&pszText), buf.data());
 		return true;
 	}
 
@@ -629,6 +829,7 @@ public:
 				count++;
 			}
 		}
+		fprintf(stderr, "[XML] GetNumChildren(<%s>) = %d\n", xml->current_node.name(), count);
 		return count;
 	}
 
