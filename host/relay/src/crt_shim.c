@@ -43,11 +43,11 @@ __declspec(naked) void __cdecl _chkstk(void) {
 }
 
 /* __except_list — SEH exception registration chain pointer.
-   In the full CRT, this is thread-local and initialized per-thread.
-   For our relay (single-threaded XML loading), a simple global suffices.
-   NOTE: C compiler adds leading underscore, so _except_list in source
-   becomes __except_list in the linker (matching what the .obj files need). */
-unsigned long _except_list = 0;
+   Defined as an absolute symbol (EQU 0) in exsup.asm, NOT as a data variable.
+   The compiler and CRT objects access it as fs:__except_list, which must
+   resolve to fs:[0] (TEB offset 0 = SEH chain head). A data variable here
+   would make fs:__except_list read from TEB+variable_address → crash.
+   See exsup.asm for the correct definition. */
 
 /* _DllMainCRTStartup — DLL entry point that initializes the CRT.
    We call the C++ global constructors stored in the .CRT section. */
