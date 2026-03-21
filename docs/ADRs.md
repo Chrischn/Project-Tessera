@@ -172,3 +172,24 @@ Format: decision → rationale → alternatives considered.
 - Named pipes: Windows-specific API (`\\.\pipe\name`), Linux FIFOs have different semantics, Wine-to-native pipe communication is unreliable
 - Shared memory: fastest IPC but significantly more complex (synchronization, memory layout contracts, cache coherence), overkill for a turn-based game
 - Hybrid (pipes + shared memory): best of both but doubles the IPC surface area to maintain
+
+---
+
+## ADR-010 — Relay DLL for VS2003 CRT Isolation
+
+**Status:** Accepted (2026-03-21)
+
+**Decision:** Insert a thin relay DLL compiled with VS2003 (MSVC 7.1) between CvGameCoreDLL.dll and TesseraHost.exe.
+
+**Rationale:**
+- CvGameCoreDLL.dll (VS2003, msvcr71/msvcp71) and TesseraHost.exe (VS2022, ucrt) cannot share STL types across the CRT boundary — std::string, std::wstring, and std::vector have incompatible layouts and allocators
+- The relay shares VS2003's CRT natively, so all STL operations between relay and game DLL are safe
+- The relay communicates with the VS2022 host via a pure C function pointer table (HostCallbacks) — no STL types cross this boundary
+- Pre-built relay binary committed to repo; only contributors modifying the relay need the free Visual C++ Toolkit 2003
+- Preserves "unmodified mod DLLs" goal — the relay works with any VS2003-compiled game DLL
+
+**Alternatives considered:**
+- Raw memory manipulation of VS2003 STL types from VS2022 host: attempted, proved fragile (crashes on string heap allocation, vector push_back, cross-CRT free — confirmed empirically)
+- Calling msvcp71.dll's string::assign from VS2022: partially worked for strings but didn't solve std::vector ABI issues
+- Compiling the entire host with VS2003: would lose C++17, pugixml, yyjson, modern tooling
+- Recompiling game DLLs for VS2022: breaks mod compatibility (the killer feature)
