@@ -42,44 +42,41 @@ struct FXmlSchemaCache {
 };
 
 // =============================================================================
-// VS2003 CRT allocator — we must use the DLL's own CRT (msvcr71.dll) for
-// std::string heap allocations, because the VS2003 string destructor will
-// call VS2003's free() on the buffer. Using our VS2022 malloc would crash.
+// VS2003 string/wstring assign — call the VS2003 CRT's own string::assign
+// method from msvcp71.dll. This lets the VS2003 string handle its own memory
+// management, completely avoiding cross-CRT allocator conflicts.
 // =============================================================================
 
-typedef void* (__cdecl *MallocFn)(size_t);
-typedef void  (__cdecl *FreeFn)(void*);
-static MallocFn g_vs2003_malloc = nullptr;
-static FreeFn   g_vs2003_free = nullptr;
+// std::string::assign(const char*) — __thiscall, returns string&
+typedef void* (__thiscall *StringAssignFn)(void* thisPtr, const char* str);
+// std::wstring::assign(const wchar_t*) — __thiscall, returns wstring&
+typedef void* (__thiscall *WStringAssignFn)(void* thisPtr, const wchar_t* str);
 
-static void initVS2003Allocator() {
-	if (g_vs2003_malloc) return;  // Already initialized
+static StringAssignFn g_vs2003_string_assign = nullptr;
+static WStringAssignFn g_vs2003_wstring_assign = nullptr;
+static bool g_vs2003_stl_initialized = false;
 
-	// msvcr71.dll should already be loaded (CvGameCoreDLL.dll depends on it)
-	HMODULE hCrt = GetModuleHandleA("msvcr71.dll");
-	if (!hCrt) {
-		fprintf(stderr, "[XML WARNING] msvcr71.dll not found — falling back to our malloc\n");
-		g_vs2003_malloc = &malloc;
-		g_vs2003_free = &free;
+static void initVS2003STL() {
+	if (g_vs2003_stl_initialized) return;
+	g_vs2003_stl_initialized = true;
+
+	// msvcp71.dll is the VS2003 C++ Standard Library (already loaded by CvGameCoreDLL.dll)
+	HMODULE hStl = GetModuleHandleA("msvcp71.dll");
+	if (!hStl) {
+		fprintf(stderr, "[XML ERROR] msvcp71.dll not found!\n");
 		return;
 	}
 
-	g_vs2003_malloc = (MallocFn)GetProcAddress(hCrt, "malloc");
-	g_vs2003_free = (FreeFn)GetProcAddress(hCrt, "free");
+	// std::string::assign(const char*)
+	g_vs2003_string_assign = (StringAssignFn)GetProcAddress(hStl,
+		"?assign@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV12@PBD@Z");
 
-	if (!g_vs2003_malloc || !g_vs2003_free) {
-		fprintf(stderr, "[XML WARNING] Could not resolve msvcr71 malloc/free — falling back\n");
-		g_vs2003_malloc = &malloc;
-		g_vs2003_free = &free;
-		return;
-	}
+	// std::wstring::assign(const wchar_t*)
+	g_vs2003_wstring_assign = (WStringAssignFn)GetProcAddress(hStl,
+		"?assign@?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAEAAV12@PBG@Z");
 
-	fprintf(stderr, "[XML] VS2003 allocator (msvcr71.dll) initialized OK\n");
-}
-
-static void* vs2003_malloc(size_t size) {
-	initVS2003Allocator();
-	return g_vs2003_malloc(size);
+	fprintf(stderr, "[XML] VS2003 STL (msvcp71.dll): string::assign=%p wstring::assign=%p\n",
+		g_vs2003_string_assign, g_vs2003_wstring_assign);
 }
 
 // =============================================================================
@@ -109,22 +106,11 @@ static void* vs2003_malloc(size_t size) {
 // If the allocator adds 4 bytes at the beginning, shift all by 4.
 // The correct offsets are validated by checking that _Myres = 15 for a
 // default-constructed string passed from the DLL.
-// The raw byte dump shows:
-//   offset 0-3: CD CD CD CD (allocator, uninitialized in debug)
-//   offset 4:   00 (SSO buffer start, null terminator for empty string)
-//   offset 20:  00 00 00 00 (_Mysize = 0)
-//   offset 24:  0F 00 00 00 (_Myres = 15)
-//
-// BUT using offset 4 for _Bx causes hard crashes. This suggests the
-// DLL was compiled in Release mode where the allocator IS optimized away
-// via EBO, making the actual runtime layout = offset 0 for _Bx.
-// The 0xCDCDCDCD at offset 0 is just OUR debug fill from stack init,
-// overwritten by the DLL when it constructs the string.
-//
-// Use offset-0 layout (matching Release-compiled DLL behavior).
-static const size_t VS2003_BX_OFFSET = 0;
-static const size_t VS2003_MYSIZE_OFFSET = 16;
-static const size_t VS2003_MYRES_OFFSET = 20;
+// Raw byte dump confirmed: _Myres=15 at offset 24, _Mysize=0 at offset 20.
+// This is the 28-byte VS2003 layout with allocator at offset 0.
+static const size_t VS2003_BX_OFFSET = 4;
+static const size_t VS2003_MYSIZE_OFFSET = 20;
+static const size_t VS2003_MYRES_OFFSET = 24;
 
 static void writeVS2003String(char* raw, const char* text) {
 	size_t len = text ? strlen(text) : 0;
@@ -152,16 +138,11 @@ static void writeVS2003String(char* raw, const char* text) {
 		ptr[len] = '\0';
 		*pMysize = len;
 	} else {
-		// Need bigger buffer. The DLL passed a default-constructed or small string.
-		// Allocate a new heap buffer. We use malloc (our CRT), which means the DLL
-		// must NOT try to free this buffer with its VS2003 free(). In practice,
-		// the DLL copies the string content elsewhere and the local string goes
-		// out of scope without freeing (or it leaks — acceptable for MVP).
-		//
-		// If currently in SSO mode (myres <= 15), switch to heap mode.
-		// If currently in heap mode but too small, replace the pointer.
-		size_t newres = len + 16; // Extra space to avoid repeated reallocs
-		char* newbuf = static_cast<char*>(vs2003_malloc(newres + 1));
+		// Need bigger buffer than current _Myres allows.
+		// Allocate via VS2003's CRT (msvcr71.dll::malloc) so the
+		// VS2003 string destructor can safely free it.
+		size_t newres = len + 16;
+		char* newbuf = static_cast<char*>(malloc(newres + 1));
 		if (!newbuf) {
 			fprintf(stderr, "[XML ERROR] malloc failed for string of size %zu\n", len);
 			return;
@@ -169,10 +150,17 @@ static void writeVS2003String(char* raw, const char* text) {
 		memcpy(newbuf, text, len);
 		newbuf[len] = '\0';
 
-		// Set heap pointer at _Bx offset
+		// If switching from SSO to heap, the old SSO buffer is just stack memory
+		// (part of the string struct itself) — no need to free it.
+		// If already in heap mode, the old _Ptr buffer was allocated by VS2003's
+		// allocator — we must NOT free it (let the DLL handle it or leak it).
+		// Just overwrite the pointer.
+		fprintf(stderr, "[XML] HEAP ALLOC: switching SSO->heap, len=%zu newres=%zu buf=%p\n", len, newres, newbuf);
 		*reinterpret_cast<char**>(bx) = newbuf;
 		*pMysize = len;
 		*pMyres = newres;
+		fprintf(stderr, "[XML] HEAP ALLOC: pointer written to bx(+%zu), _Mysize=%zu, _Myres=%zu\n",
+			VS2003_BX_OFFSET, *pMysize, *pMyres);
 	}
 }
 
@@ -207,7 +195,7 @@ static void writeVS2003WString(char* raw, const wchar_t* text) {
 		*pMysize = len;
 	} else {
 		size_t newres = len + 16;
-		wchar_t* newbuf = static_cast<wchar_t*>(vs2003_malloc((newres + 1) * sizeof(wchar_t)));
+		wchar_t* newbuf = static_cast<wchar_t*>(malloc((newres + 1) * sizeof(wchar_t)));
 		if (!newbuf) {
 			fprintf(stderr, "[XML ERROR] malloc failed for wstring of size %zu\n", len);
 			return;
@@ -632,19 +620,15 @@ public:
 		const char* text = getNodeText(xml->current_node);
 		fprintf(stderr, "[XML] GetLastNodeValue(string) <%s> = \"%s\"\n", xml->current_node.name(), text);
 
-		// Dump raw bytes of the incoming string for layout diagnostics
-		{
-			char* raw = reinterpret_cast<char*>(&pszText);
-			fprintf(stderr, "[XML] string raw bytes (first 32): ");
-			for (int i = 0; i < 32; i++) fprintf(stderr, "%02X ", (unsigned char)raw[i]);
-			fprintf(stderr, "\n");
-			fprintf(stderr, "[XML] string layout check: offset16=%u offset20=%u offset24=%u\n",
-				*reinterpret_cast<unsigned*>(raw+16),
-				*reinterpret_cast<unsigned*>(raw+20),
-				*reinterpret_cast<unsigned*>(raw+24));
+		// Use VS2003's own string::assign method from msvcp71.dll.
+		// This avoids all cross-CRT memory management issues.
+		initVS2003STL();
+		if (g_vs2003_string_assign) {
+			g_vs2003_string_assign(&pszText, text);
+		} else {
+			// Fallback: raw write (may crash on heap-allocated strings)
+			writeVS2003String(reinterpret_cast<char*>(&pszText), text);
 		}
-
-		writeVS2003String(reinterpret_cast<char*>(&pszText), text);
 		return true;
 	}
 
@@ -661,7 +645,13 @@ public:
 		std::vector<wchar_t> buf(wlen);
 		MultiByteToWideChar(CP_UTF8, 0, text, -1, buf.data(), wlen);
 
-		writeVS2003WString(reinterpret_cast<char*>(&pszText), buf.data());
+		// Use VS2003's own wstring::assign from msvcp71.dll
+		initVS2003STL();
+		if (g_vs2003_wstring_assign) {
+			g_vs2003_wstring_assign(&pszText, buf.data());
+		} else {
+			writeVS2003WString(reinterpret_cast<char*>(&pszText), buf.data());
+		}
 		return true;
 	}
 
