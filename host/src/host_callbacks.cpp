@@ -451,7 +451,25 @@ static int cb_xml_num_children_by_tag(void* xml_ptr, const char* tag) {
 
 static int cb_xml_num_elements_by_tag(void* xml_ptr, const char* tag) {
     cb_trace("cb_xml_num_elements_by_tag");
-    return cb_xml_num_children_by_tag(xml_ptr, tag);
+    FXml* xml = static_cast<FXml*>(xml_ptr);
+
+    // The game DLL passes full paths like "Civ4Types/FlavorTypes/FlavorType".
+    // After LocateNode navigated to the first matching element, we need to
+    // count all sibling elements with the same tag name (last path component).
+    const char* simple_tag = tag;
+    const char* last_slash = strrchr(tag, '/');
+    if (last_slash) simple_tag = last_slash + 1;
+
+    // Count siblings (including current) in parent with matching tag
+    pugi::xml_node parent = xml->current_node.parent();
+    if (!parent) return 0;
+    int count = 0;
+    for (pugi::xml_node sib = parent.first_child(); sib;
+         sib = sib.next_sibling()) {
+        if (sib.type() == pugi::node_element && strcmp(sib.name(), simple_tag) == 0)
+            count++;
+    }
+    return count;
 }
 
 static int cb_xml_is_comment_node(void* xml_ptr) {
