@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Debug client: sends init + shutdown to TesseraHost for cdb debugging."""
+import socket
+import struct
+import json
+import sys
+import time
+
+
+def send_msg(sock, obj):
+    data = json.dumps(obj).encode('utf-8')
+    sock.sendall(struct.pack('<I', len(data)) + data)
+
+
+def recv_msg(sock, timeout=300):
+    sock.settimeout(timeout)
+    raw_len = sock.recv(4)
+    if not raw_len:
+        return None
+    length = struct.unpack('<I', raw_len)[0]
+    data = b''
+    while len(data) < length:
+        chunk = sock.recv(length - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return json.loads(data.decode('utf-8'))
+
+
+def main():
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 12345
+    base_path = sys.argv[2] if len(sys.argv) > 2 else r"E:\Programming\Civ4"
+
+    # Retry connection — cdb needs a moment to start the process
+    for attempt in range(10):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect(('127.0.0.1', port))
+            print(f"[debug_client] Connected to 127.0.0.1:{port}")
+            break
+        except ConnectionRefusedError:
+            print(f"[debug_client] Connection refused, retry {attempt+1}/10...")
+            sock.close()
+            time.sleep(2)
+    else:
+        print("[debug_client] Failed to connect after 10 retries")
+        sys.exit(1)
+
+    # Send init command
+    print(f"[debug_client] Sending init (base_path={base_path})...")
+    send_msg(sock, {"cmd": "init", "base_path": base_path})
+
+    # Wait for response (XML loading takes a while — 285k+ callbacks)
+    print("[debug_client] Waiting for init response (up to 5 min)...")
+    resp = recv_msg(sock, timeout=300)
+    print(f"[debug_client] init -> {resp}")
+
+    # Send shutdown
+    print("[debug_client] Sending shutdown...")
+    send_msg(sock, {"cmd": "shutdown"})
+    resp = recv_msg(sock, timeout=30)
+    print(f"[debug_client] shutdown -> {resp}")
+
+    sock.close()
+    print("[debug_client] Done.")
+
+
+if __name__ == "__main__":
+    main()

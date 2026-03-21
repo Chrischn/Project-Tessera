@@ -302,6 +302,11 @@ bool DllLoader::load_xml_data() {
     }
 
     // --- Loading sequence: each step with SEH protection ---
+    // Debug: extern callback diagnostics from host_callbacks.cpp
+    extern int g_cbCallCount;
+    extern const char* g_cbLastName;
+    extern const char* g_cbLastXmlFile;
+
     // Helper macro for repetitive SEH-wrapped calls
     #define XML_LOAD_STEP(name, fnPtr) \
         do { \
@@ -312,7 +317,9 @@ bool DllLoader::load_xml_data() {
             } \
             __except (EXCEPTION_EXECUTE_HANDLER) { \
                 fprintf(stderr, "[DLL ERROR] %s crashed: 0x%08X\n", name, GetExceptionCode()); \
-                goto cleanup; \
+                fprintf(stderr, "[DLL ERROR] Last callback #%d: %s\n", g_cbCallCount, g_cbLastName); \
+                fprintf(stderr, "[DLL ERROR] Last XML file: %s\n", g_cbLastXmlFile); \
+                /* Continue to next step instead of aborting */ \
             } \
         } while(0)
 

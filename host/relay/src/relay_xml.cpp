@@ -134,7 +134,7 @@ public:
 
     bool GetLastNodeText(FXml* xml, TCHAR* pszText) {
         HostCallbacks* cb = relay_get_callbacks();
-        char buf[4096];
+        char buf[1024];
         if (!cb->xml_get_last_node_text(static_cast<void*>(xml), buf, sizeof(buf)))
             return false;
         strcpy(pszText, buf);
@@ -144,7 +144,7 @@ public:
     // *** std::string — this is the key STL isolation method ***
     bool GetLastNodeValue(FXml* xml, std::string& text) {
         HostCallbacks* cb = relay_get_callbacks();
-        char buf[4096];
+        char buf[1024];
         if (!cb->xml_get_value_string(static_cast<void*>(xml), buf, sizeof(buf)))
             return false;
         text = buf;  // VS2003 native std::string assignment — SAFE!
@@ -154,7 +154,7 @@ public:
     // *** std::wstring — same pattern ***
     bool GetLastNodeValue(FXml* xml, std::wstring& text) {
         HostCallbacks* cb = relay_get_callbacks();
-        wchar_t wbuf[4096];
+        wchar_t wbuf[1024];
         if (!cb->xml_get_value_wstring(static_cast<void*>(xml), wbuf, sizeof(wbuf)/sizeof(wchar_t)))
             return false;
         text = wbuf;  // VS2003 native std::wstring assignment — SAFE!
@@ -164,7 +164,7 @@ public:
     bool GetLastNodeValue(FXml* xml, char* pszText) {
         HostCallbacks* cb = relay_get_callbacks();
         // Use our own buffer — we don't know the caller's buffer size
-        char buf[4096];
+        char buf[1024];
         if (!cb->xml_get_value_string(static_cast<void*>(xml), buf, sizeof(buf)))
             return false;
         strcpy(pszText, buf);  // Copy to caller's buffer
@@ -174,7 +174,7 @@ public:
     bool GetLastNodeValue(FXml* xml, wchar* pszText) {
         HostCallbacks* cb = relay_get_callbacks();
         // Use our own buffer — we don't know the caller's buffer size
-        wchar_t wbuf[4096];
+        wchar_t wbuf[1024];
         if (!cb->xml_get_value_wstring(static_cast<void*>(xml), wbuf, sizeof(wbuf)/sizeof(wchar_t)))
             return false;
         wcscpy(pszText, wbuf);  // Copy to caller's buffer
@@ -243,7 +243,7 @@ public:
     bool GetLastLocatedNodeTagName(FXml* xml, TCHAR* pszTagName) {
         HostCallbacks* cb = relay_get_callbacks();
         // Use our own buffer — we don't know the caller's buffer size
-        char buf[4096];
+        char buf[1024];
         if (!cb->xml_get_tag_name(static_cast<void*>(xml), buf, sizeof(buf)))
             return false;
         strcpy(pszTagName, buf);

@@ -382,6 +382,13 @@ public:
     }
 
     void* newMem(size_t size) {
+        if (size > 100000000) {
+            HostCallbacks* cb = relay_get_callbacks();
+            char msg[256];
+            sprintf(msg, "SUSPICIOUS newMem(%u) — likely negative iInfoBaseLength cast to size_t", (unsigned)size);
+            cb->log_msg("relay_debug", msg);
+            return NULL;
+        }
         return malloc(size);
     }
 
@@ -391,7 +398,13 @@ public:
     }
 
     void* newMem(size_t size, const char* pcFile, int iLine) {
-        (void)pcFile; (void)iLine;
+        if (size > 100000000) {
+            HostCallbacks* cb = relay_get_callbacks();
+            char msg[256];
+            sprintf(msg, "SUSPICIOUS newMem(%u, %s:%d)", (unsigned)size, pcFile ? pcFile : "?", iLine);
+            cb->log_msg("relay_debug", msg);
+            return NULL;
+        }
         return malloc(size);
     }
 

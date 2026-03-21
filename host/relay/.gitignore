@@ -1,0 +1,8 @@
+# Relay build artifacts
+*.obj
+*.exp
+*.pdb
+
+# lib71/ — everything is generated except the .def files
+lib71/*
+!lib71/*.def
