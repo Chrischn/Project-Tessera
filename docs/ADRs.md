@@ -193,3 +193,25 @@ Format: decision → rationale → alternatives considered.
 - Calling msvcp71.dll's string::assign from VS2022: partially worked for strings but didn't solve std::vector ABI issues
 - Compiling the entire host with VS2003: would lose C++17, pugixml, yyjson, modern tooling
 - Recompiling game DLLs for VS2022: breaks mod compatibility (the killer feature)
+
+---
+
+## ADR-011 — BtS-Only Engine Scope
+
+**Status:** Accepted (2026-03-21)
+
+**Decision:** Project Tessera recreates the Beyond the Sword (BtS 3.19) engine only. We do not support running vanilla Civ4 or Warlords CvGameCoreDLL.dll binaries.
+
+**Rationale:**
+The TesseraHost bridge architecture requires the CvGameCoreDLL.dll source code to build a functioning translation layer. Only the BtS 3.19 SDK source is publicly available — Firaxis never released the CvGameCoreDLL source for vanilla Civilization IV or the Warlords expansion. Without source code, we cannot:
+- Determine the correct CvDLLUtilityIFaceBase vtable layout (it differs between game versions)
+- Implement the relay DLL's interface stubs (which must match the exact virtual method signatures the DLL expects)
+- Understand the XML loading call sequences and expected callback behavior
+
+Since BtS is the definitive version of Civ4 (all active mods target it), and its SDK provides the only available CvGameCoreDLL source, scoping to BtS-only is both practical and sufficient.
+
+Note: BtS inherits XML content from the Warlords expansion (e.g. trait definitions, leader data). The host's XML path resolver loads Warlords XML assets as a fallback when BtS doesn't override them — this is data inheritance, not DLL compatibility.
+
+**Alternatives considered:**
+- Supporting all three game versions: impossible without vanilla/Warlords CvGameCoreDLL source code; reverse-engineering is not an option under our clean-room GPL 3.0 approach
+- Shipping our own CvGameCoreDLL compiled from the BtS SDK: viable for vanilla BtS but breaks mod compatibility (mods ship their own CvGameCoreDLL.dll compiled against the BtS SDK with VS2003)
