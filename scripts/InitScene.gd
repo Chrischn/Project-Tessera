@@ -43,20 +43,36 @@ func _ready() -> void:
 	VFS.initialize(base_path, Global.assets0, Global.assets1, Global.assets2, Global.assets3)
 	
 	await get_tree().create_timer(0.1).timeout
-	find_child("ProgressText").text = "Init Check XML"
-	await get_tree().create_timer(0.2).timeout
-	find_child("ProgressText").text = "Init Audio"
-	await get_tree().create_timer(0.2).timeout
-	find_child("ProgressText").text = "Init Python"
-	await get_tree().create_timer(0.2).timeout
-	find_child("ProgressText").text = "Init XML (cached)"
-	await get_tree().create_timer(0.2).timeout
+
+	# --- Host Bridge: spawn TesseraHost.exe and load XML data ----------------
+	find_child("ProgressText").text = "Init Game Logic"
+	await get_tree().process_frame
+
+	Global.host_bridge = HostBridge.new()
+	add_child(Global.host_bridge)  # Must be in tree for _process() and timers
+	Global.host_bridge.connection_lost.connect(_on_host_connection_lost)
+
+	if await Global.host_bridge.spawn_host():
+		find_child("ProgressText").text = "Loading XML Data"
+		await get_tree().process_frame
+		var result = await Global.host_bridge.init_game(base_path)
+		if result.get("status") == "ok":
+			print("[Init] Game logic initialized successfully")
+		else:
+			push_error("[Init] Host init failed: " + str(result.get("message", "unknown")))
+	else:
+		push_error("[Init] Failed to spawn TesseraHost")
+
 	find_child("ProgressText").text = "Init Engine"
 	await get_tree().create_timer(0.2).timeout
 	find_child("ProgressText").text = "Init Fonts"
 	await get_tree().create_timer(0.2).timeout
 	
 	call_deferred("_proceed_to_menu") # Proceed to MenuScene function
+
+## Called when HostBridge detects the TCP connection was lost unexpectedly.
+func _on_host_connection_lost():
+	push_error("[Host] Connection to TesseraHost lost!")
 
 # Changes the scene to the main menu after short delay
 func _proceed_to_menu() -> void:
