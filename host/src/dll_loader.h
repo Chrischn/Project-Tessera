@@ -44,6 +44,9 @@ public:
     // Get pointer to CvGlobals singleton (for data extraction later).
     void* get_globals() { return m_pGlobals; }
 
+    // Get the loaded CvGameCoreDLL handle (for GetProcAddress on exports).
+    HMODULE get_dll_handle() { return m_hDll; }
+
     // Unload the DLL and reset all state.
     void unload();
 

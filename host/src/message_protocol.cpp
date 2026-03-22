@@ -12,11 +12,15 @@
 #include "message_protocol.h"
 #include "tcp_server.h"
 #include "dll_loader.h"
+#include "python_bridge.h"
 
 #include <yyjson.h>
 #include <cstdio>
 #include <cstring>
 #include <string>
+
+// Global PythonBridge instance — initialized during handle_init()
+static PythonBridge g_pyBridge;
 
 // ---------------------------------------------------------------------------
 // parse_command
@@ -220,6 +224,14 @@ static void handle_init(const char* json, uint32_t len,
         fprintf(stderr, "[Protocol] init: XML loading completed successfully\n");
     }
 
+    // Initialize Python bridge for data extraction
+    std::string pyError;
+    if (g_pyBridge.init(dll_loader.get_dll_handle(), pyError)) {
+        fprintf(stderr, "[Protocol] init: Python bridge initialized\n");
+    } else {
+        fprintf(stderr, "[Protocol] init: Python bridge failed: %s (non-fatal)\n", pyError.c_str());
+    }
+
     // Report success (even if XML loading partially failed — init() worked)
     auto resp = build_response("ok");
     server.send_message(resp.data(), static_cast<uint32_t>(resp.size()));
@@ -247,6 +259,74 @@ void dispatch_command(const char* json, uint32_t len,
 
     } else if (cmd == "init") {
         handle_init(json, len, server, dll_loader);
+
+    } else if (cmd == "pytest") {
+        if (!g_pyBridge.is_initialized()) {
+            auto err = build_error("pytest: Python bridge not initialized");
+            server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        } else {
+            // Build the test script dynamically so it writes to the bridge's temp file
+            std::string tempPath = g_pyBridge.get_temp_file_path();
+            // Convert backslashes to forward slashes for Python
+            for (auto& c : tempPath) { if (c == '\\') c = '/'; }
+
+            std::string test_script =
+                "try:\n"
+                "    f = open('" + tempPath + "', 'w')\n"
+                "    from CvPythonExtensions import *\n"
+                "    gc = CyGlobalContext()\n"
+                "    nu = gc.getNumUnitInfos()\n"
+                "    nb = gc.getNumBuildingInfos()\n"
+                "    nt = gc.getNumTechInfos()\n"
+                "    np_ = gc.getNumPromotionInfos()\n"
+                "    f.write('Unit infos: %d\\n' % nu)\n"
+                "    f.write('Building infos: %d\\n' % nb)\n"
+                "    f.write('Tech infos: %d\\n' % nt)\n"
+                "    f.write('Promotion infos: %d\\n' % np_)\n"
+                "    for i in range(min(3, nu)):\n"
+                "        info = gc.getUnitInfo(i)\n"
+                "        if info:\n"
+                "            f.write('Unit[%d]: type=%s combat=%d moves=%d cost=%d\\n'\n"
+                "                    % (i, info.getType(), info.getCombat(),\n"
+                "                       info.getMoves(), info.getProductionCost()))\n"
+                "    for i in range(min(3, nt)):\n"
+                "        info = gc.getTechInfo(i)\n"
+                "        if info:\n"
+                "            f.write('Tech[%d]: type=%s cost=%d era=%d\\n'\n"
+                "                    % (i, info.getType(), info.getResearchCost(),\n"
+                "                       info.getEra()))\n"
+                "    f.write('SUCCESS\\n')\n"
+                "    f.close()\n"
+                "except Exception, e:\n"
+                "    f2 = open('" + tempPath + "', 'w')\n"
+                "    f2.write('EXCEPTION: %s\\n' % str(e))\n"
+                "    f2.close()\n";
+
+            fprintf(stderr, "[Protocol] pytest: running extraction test via PythonBridge...\n");
+            std::string result = g_pyBridge.run_script_with_output(test_script.c_str());
+            fprintf(stderr, "[Protocol] pytest: === results ===\n%s[Protocol] pytest: === end ===\n",
+                    result.c_str());
+
+            // Check if the result contains SUCCESS
+            if (result.find("SUCCESS") != std::string::npos) {
+                // Escape the result for JSON embedding
+                std::string json_body = "{\"message\":\"Python data extraction passed\",\"output\":\"";
+                for (char c : result) {
+                    if (c == '"') json_body += "\\\"";
+                    else if (c == '\\') json_body += "\\\\";
+                    else if (c == '\n') json_body += "\\n";
+                    else if (c == '\r') { /* skip */ }
+                    else json_body += c;
+                }
+                json_body += "\"}";
+                auto resp = build_response("ok", json_body.c_str());
+                server.send_message(resp.data(), static_cast<uint32_t>(resp.size()));
+            } else {
+                std::string msg = "pytest: script did not report SUCCESS: " + result;
+                auto err = build_error(msg.c_str());
+                server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+            }
+        }
 
     } else if (cmd == "shutdown") {
         auto resp = build_response("ok");

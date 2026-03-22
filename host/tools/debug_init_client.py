@@ -59,6 +59,13 @@ def main():
     resp = recv_msg(sock, timeout=300)
     print(f"[debug_client] init -> {resp}")
 
+    if resp and resp.get("status") == "ok":
+        # Send pytest command — PoC for Python 2.4 embedding + data extraction
+        print("[debug_client] Sending pytest (Python data extraction PoC)...")
+        send_msg(sock, {"cmd": "pytest"})
+        resp = recv_msg(sock, timeout=60)
+        print(f"[debug_client] pytest -> {resp}")
+
     # Send shutdown
     print("[debug_client] Sending shutdown...")
     send_msg(sock, {"cmd": "shutdown"})
