@@ -215,3 +215,23 @@ Note: BtS inherits XML content from the Warlords expansion (e.g. trait definitio
 **Alternatives considered:**
 - Supporting all three game versions: impossible without vanilla/Warlords CvGameCoreDLL source code; reverse-engineering is not an option under our clean-room GPL 3.0 approach
 - Shipping our own CvGameCoreDLL compiled from the BtS SDK: viable for vanilla BtS but breaks mod compatibility (mods ship their own CvGameCoreDLL.dll compiled against the BtS SDK with VS2003)
+
+---
+
+## ADR-012 — Data Extraction via Embedded Python 2.4
+
+**Status:** Accepted (2026-03-22)
+
+**Decision:** Extract game data from CvGameCoreDLL.dll by embedding the Python 2.4 interpreter (already loaded as a DLL dependency) and calling the DLL's Boost.Python bindings.
+
+**Rationale:**
+- Critical CvGlobals getters (`getUnitInfo(i)`, `getBuildingInfo(i)`, `getTechInfo(i)`) are **inline in headers** and NOT exported from the DLL — cannot use GetProcAddress
+- Every CvGameCoreDLL.dll exports `DLLPublishToPython()` which registers 1,331 Python-exposed methods via Boost.Python
+- The Python bindings use the DLL's own class layout offsets — automatically correct for each mod's modified CvGlobals
+- python24.dll is already loaded as a DLL dependency — no additional binaries needed
+- 100% mod-compatible: mods that extend CvPythonExtensions expose their custom data too
+
+**Alternatives considered:**
+- Direct GetProcAddress for CvGlobals getters: impossible — most getters are inline, not exported
+- Extending the relay DLL with data accessors: would need recompilation per mod (breaks mod compatibility since mods change CvGlobals layout)
+- Parsing XML ourselves and skipping CvGlobals: would lose computed/derived data and cross-reference resolution
