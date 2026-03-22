@@ -24,6 +24,19 @@ You must own a legitimate copy of Sid Meier’s Civilization® IV and the expans
 The source code in this repository (excluding third-party code) was written from scratch, based on publicly available information and observed behavior for interoperability. No decompiled, disassembled, or leaked source code from Civilization IV, its expansions or the Gamebryo engine was used.
 
 -------
+## Architecture
+
+Architecture diagrams (C4 model, PlantUML):
+- [`docs/C1_Context.puml`](docs/C1_Context.puml) — System context
+- [`docs/C2_Container.puml`](docs/C2_Container.puml) — Container diagram (Godot, GDExtension, TesseraHost, Relay, CvGameCoreDLL)
+- [`docs/C3_Component.puml`](docs/C3_Component.puml) — GDExtension component detail
+- [`docs/Data_Extraction_Architecture.puml`](docs/Data_Extraction_Architecture.puml) — Python bridge data flow
+
+> *View these with any PlantUML renderer, VS Code PlantUML extension, or paste into [plantuml.com](https://www.plantuml.com/plantuml)*
+
+For detailed architecture decisions, see [`docs/ADRs.md`](docs/ADRs.md) (ADR-001 through ADR-012).
+
+-------
 # The Project
 
 ### What is this all about?
@@ -57,33 +70,37 @@ We have all the mosaic tiles, we just need to put them together!
 * [DESIGNER NOTES - Soren Johnson's Game Design Journal](https://www.designer-notes.com/category/civ/)
 
 -------
-## Current Status / Goals (last updated: 2026-03-07)
+## Current Status (last updated: 2026-03-22)
 
-### Status
-* Verification of the original .exe file works
+### NIF Pipeline (Godot GDExtension, C++17)
+* NIF mesh rendering (NiTriShape, NiTriStrips) with skeletal skinning and bone attachments
+* Skeletal animations (KFM/KF) with scale keyframes
+* Team colors (ShaderMaterial), specular maps, debug skeleton visualization
+* Scene controllers: UV scroll, flipbook, transparency, color, visibility (via AnimationPlayer)
+* Lights: NiPointLight, NiDirectionalLight, NiSpotLight → Godot equivalents
+* NiBillboardNode, NiLODNode, NiSwitchNode, NiStencilProperty (double-sided)
+* Particle placeholder (billboard Sprite3D)
 
-* Loading of .fpk archives works
+### TesseraHost Bridge (C++17 + VS2003 relay)
+* Loads **unmodified** 32-bit CvGameCoreDLL.dll — vanilla BTS and total conversion mods (tested with Rise of Mankind, Caveman2Cosmos)
+* XML config loading: all 9 loading steps, 106 XML files parsed via pugixml
+* Data extraction via embedded Python 2.4 + Boost.Python bindings (92 techs, 159 buildings, 123 units, 36 civilizations, 224 unit art definitions, and more)
+* Art define lookups: game type → NIF/KFM asset path (e.g., `ART_DEF_UNIT_WARRIOR` → `Art/Units/Warrior/Warrior.nif`)
+* TCP protocol between Godot (64-bit) and TesseraHost (32-bit) via length-prefixed JSON
+* Linux support: TesseraHost runs under Wine, TCP bridge works across Wine↔native
 
-* Basic main menu is implemented
+### Core Infrastructure
+* Exe verification (SHA256 hash check of Civ4BeyondSword.exe)
+* FPK archive loading (ROT-1 + XOR signature)
+* Virtual File System with asset override priority (mod → BTS → Warlords → base)
+* Main menu with font loading
+* Build system: unified CMake (godot-cpp + niflib + GDExtension)
 
-* Loading of .nif files works (only meshes are drawn in 3D for now)
-
-* Build system migrated from SCons to CMake (unified build for godot-cpp + niflib + extension)
-
-Summary: In its current state it's possible to load a .nif file in 3D and see its mesh model.
-
-### Goals
-* Add option for development on Linux
-
-* Continue development of .nif file import function and translation to Godot nodes
-
-* Plan out the integration of CvGameCoreDLL -> what about compability with saves and mods?
-
-* Create basic landscape drawing in 3D world (Godot GridMap? https://docs.godotengine.org/en/stable/tutorials/3d/using_gridmaps.html)
-
-* XML config loading (requires CvGameCoreDLL?)
-
-* GUI theme config loading (requires CvGameCoreDLL?)
+### Next Up
+* Terrain/landscape rendering
+* GUI themes
+* Python mod script execution (pybind11 integration)
+* Save/load, multiplayer
 
 
 -------
@@ -118,12 +135,19 @@ A step by step set of instructions that tell you how to get a development env ru
 	* `git submodule update --init --recursive`
 
 
-* (For building the project for use in Godot Editor) Start Developer Command Prompt for VS 2022 and use these commands:
+* (For building the GDExtension — NIF pipeline) Start Developer Command Prompt for VS 2022:
 
 	* `cd [Project-Tessera Location]`
 	* `cmake -B build -G "Visual Studio 17 2022" -A x64`  *(configure — run once, or after CMakeLists.txt changes)*
 	* `cmake --build build --config Debug`
 
+* (For building TesseraHost — game logic bridge) Same command prompt:
+
+	* `cd [Project-Tessera Location]\host`
+	* `cmake -B build -G "Visual Studio 17 2022" -A Win32`  *(note: Win32, not x64)*
+	* `cmake --build build --config Release`  *(note: Release, not Debug — required for CRT compatibility)*
+
+* The TesseraRelay.dll is pre-built and included in the repo. No action needed unless you modify `host/relay/src/`.
 
 * Open project.godot with "Godot_v4.5-stable_win64_console.exe"
 
@@ -131,18 +155,16 @@ A step by step set of instructions that tell you how to get a development env ru
 
 * Select your **Civ4BeyondSword.exe** once prompted (only required on the first start)
 
-* Select "Single Player > Play Now!"
-
-* Enjoy!
+* The init screen will spawn TesseraHost, load XML data (~40 seconds), then proceed to the main menu
 
 -------
 ## Contributing
 
-[WORK IN PGORESS] Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on the process for submitting pull requests to the project or how to help out.
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on submitting pull requests, and [STYLE_GUIDE.md](STYLE_GUIDE.md) for coding conventions.
 
 ## Versioning
 
-[WORK IN PGORESS] [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/Chrischn/Project-Tessera/tags). 
+This project uses [SemVer](http://semver.org/) for versioning. Current version: **0.1.0** (prototype). For the versions available, see the [tags on this repository](https://github.com/Chrischn/Project-Tessera/tags).
 
 -------
 ## Authors

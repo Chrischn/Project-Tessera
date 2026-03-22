@@ -18,7 +18,23 @@ The full license text is available in the included niflib LICENSE.txt file.
 ----------------------
 
 ## Qhull
-This project includes code from [qhull](https://github.com/qhull/qhull), 
+This project includes code from [qhull](https://github.com/qhull/qhull),
 which is licensed under its own custom license.
 
 The full license text is available in the included qhull COPYING.txt file.
+
+----------------------
+
+## pugixml
+This project includes code from [pugixml](https://github.com/zeux/pugixml),
+which is licensed under the MIT License.
+
+The full license text is available in the included pugixml LICENSE.md file.
+
+----------------------
+
+## yyjson
+This project includes code from [yyjson](https://github.com/ibireme/yyjson),
+which is licensed under the MIT License.
+
+The full license text is available in the included yyjson LICENSE file.
