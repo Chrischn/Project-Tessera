@@ -126,6 +126,27 @@ bool DllLoader::load(const std::string& dll_path) {
         fprintf(stderr, "[DLL] CvXMLLoadUtility exports resolved OK\n");
     }
 
+    // -----------------------------------------------------------------------
+    // Resolve CvArtFileMgr exports — needed to build art info lookup maps.
+    // Without these, updateArtDefineButton() in CvUnitInfo::read() crashes
+    // because the art info maps are never allocated/populated.
+    // -----------------------------------------------------------------------
+    m_pfnArtMgrGetInstance = (ArtMgrGetInstanceFn)GetProcAddress(m_hDll,
+        "?GetInstance@CvArtFileMgr@@SAAAV1@XZ");
+    m_pfnArtMgrInit = (ArtMgrVoidFn)GetProcAddress(m_hDll,
+        "?Init@CvArtFileMgr@@QAEXXZ");
+    m_pfnArtMgrBuildMaps = (ArtMgrVoidFn)GetProcAddress(m_hDll,
+        "?buildArtFileInfoMaps@CvArtFileMgr@@QAEXXZ");
+
+    if (m_pfnArtMgrGetInstance && m_pfnArtMgrInit && m_pfnArtMgrBuildMaps) {
+        fprintf(stderr, "[DLL] CvArtFileMgr exports resolved OK\n");
+    } else {
+        fprintf(stderr, "[DLL WARNING] CvArtFileMgr exports missing:\n");
+        fprintf(stderr, "  GetInstance:          %s\n", m_pfnArtMgrGetInstance ? "OK" : "MISSING");
+        fprintf(stderr, "  Init:                %s\n", m_pfnArtMgrInit ? "OK" : "MISSING");
+        fprintf(stderr, "  buildArtFileInfoMaps:%s\n", m_pfnArtMgrBuildMaps ? "OK" : "MISSING");
+    }
+
     fprintf(stderr, "[DLL] All exports resolved successfully\n");
     return true;
 }
@@ -338,6 +359,29 @@ bool DllLoader::load_xml_data() {
     if (m_pfnSetGlobalArtDefines)
         XML_LOAD_STEP("SetGlobalArtDefines", m_pfnSetGlobalArtDefines);
 
+    // --- Initialize CvArtFileMgr maps after art defines are loaded ---
+    // The game EXE normally calls CvArtFileMgr::Init() + buildArtFileInfoMaps()
+    // after SetGlobalArtDefines. Without this, updateArtDefineButton() in
+    // CvUnitInfo::read() crashes (null pointer dereference on unallocated maps).
+    if (m_pfnArtMgrGetInstance && m_pfnArtMgrInit && m_pfnArtMgrBuildMaps) {
+        fprintf(stderr, "[DLL] Initializing CvArtFileMgr...\n");
+        __try {
+            void* artMgr = m_pfnArtMgrGetInstance();
+            if (artMgr) {
+                m_pfnArtMgrInit(artMgr);
+                fprintf(stderr, "[DLL] CvArtFileMgr::Init() OK\n");
+                m_pfnArtMgrBuildMaps(artMgr);
+                fprintf(stderr, "[DLL] CvArtFileMgr::buildArtFileInfoMaps() OK\n");
+            } else {
+                fprintf(stderr, "[DLL ERROR] CvArtFileMgr::GetInstance() returned null\n");
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            fprintf(stderr, "[DLL ERROR] CvArtFileMgr init crashed: 0x%08X\n",
+                    GetExceptionCode());
+        }
+    }
+
     if (m_pfnLoadBasicInfos)
         XML_LOAD_STEP("LoadBasicInfos", m_pfnLoadBasicInfos);
 
@@ -402,6 +446,11 @@ void DllLoader::unload() {
     m_pfnSetupGlobalLandscapeInfo    = nullptr;
     m_pfnLoadPostMenuGlobals         = nullptr;
     m_pfnLoadGlobalText              = nullptr;
+
+    // Reset CvArtFileMgr pointers
+    m_pfnArtMgrGetInstance           = nullptr;
+    m_pfnArtMgrInit                  = nullptr;
+    m_pfnArtMgrBuildMaps             = nullptr;
 
     // Unload relay DLL (after game DLL is freed)
     if (m_hRelay) {

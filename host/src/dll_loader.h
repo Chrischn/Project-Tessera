@@ -106,4 +106,17 @@ private:
     XmlBoolFn m_pfnSetupGlobalLandscapeInfo    = nullptr;
     XmlBoolFn m_pfnLoadPostMenuGlobals         = nullptr;
     XmlBoolFn m_pfnLoadGlobalText              = nullptr;
+
+    // =========================================================================
+    // CvArtFileMgr function pointers
+    // =========================================================================
+
+    // GetInstance is a static method -> __cdecl, returns CvArtFileMgr&.
+    typedef void* (__cdecl *ArtMgrGetInstanceFn)();
+    // Init and buildArtFileInfoMaps are __thiscall member methods.
+    typedef void (__thiscall *ArtMgrVoidFn)(void* thisPtr);
+
+    ArtMgrGetInstanceFn m_pfnArtMgrGetInstance       = nullptr;
+    ArtMgrVoidFn        m_pfnArtMgrInit              = nullptr;
+    ArtMgrVoidFn        m_pfnArtMgrBuildMaps         = nullptr;
 };
