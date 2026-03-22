@@ -66,6 +66,16 @@ def main():
         resp = recv_msg(sock, timeout=60)
         print(f"[debug_client] pytest -> {resp}")
 
+        if resp and resp.get("status") == "ok":
+            # Test get_all_infos for tech
+            print("[debug_client] Sending get_all_infos (tech)...")
+            send_msg(sock, {"cmd": "get_all_infos", "type": "tech"})
+            resp = recv_msg(sock, timeout=60)
+            data = resp.get("data", []) if resp else []
+            print(f"[debug_client] get_all_infos(tech) -> {len(data)} items")
+            if data:
+                print(f"[debug_client]   first: {data[0]}")
+
     # Send shutdown
     print("[debug_client] Sending shutdown...")
     send_msg(sock, {"cmd": "shutdown"})

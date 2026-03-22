@@ -13,6 +13,7 @@
 #include "tcp_server.h"
 #include "dll_loader.h"
 #include "python_bridge.h"
+#include "data_extractor.h"
 
 #include <yyjson.h>
 #include <cstdio>
@@ -21,6 +22,9 @@
 
 // Global PythonBridge instance — initialized during handle_init()
 static PythonBridge g_pyBridge;
+
+// Global DataExtractor — wired to PythonBridge after init
+static DataExtractor g_dataExtractor;
 
 // ---------------------------------------------------------------------------
 // parse_command
@@ -228,6 +232,7 @@ static void handle_init(const char* json, uint32_t len,
     std::string pyError;
     if (g_pyBridge.init(dll_loader.get_dll_handle(), pyError)) {
         fprintf(stderr, "[Protocol] init: Python bridge initialized\n");
+        g_dataExtractor.set_bridge(&g_pyBridge);
     } else {
         fprintf(stderr, "[Protocol] init: Python bridge failed: %s (non-fatal)\n", pyError.c_str());
     }
@@ -325,6 +330,35 @@ void dispatch_command(const char* json, uint32_t len,
                 std::string msg = "pytest: script did not report SUCCESS: " + result;
                 auto err = build_error(msg.c_str());
                 server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+            }
+        }
+
+    } else if (cmd == "get_all_infos") {
+        // Parse "type" field from the incoming JSON
+        yyjson_doc* req_doc = yyjson_read(json, static_cast<size_t>(len), 0);
+        yyjson_val* req_root = req_doc ? yyjson_doc_get_root(req_doc) : nullptr;
+        yyjson_val* type_val = req_root ? yyjson_obj_get(req_root, "type") : nullptr;
+
+        std::string info_type;
+        if (type_val && yyjson_is_str(type_val))
+            info_type = yyjson_get_str(type_val);
+        if (req_doc) yyjson_doc_free(req_doc);
+
+        if (info_type.empty()) {
+            auto err = build_error("get_all_infos: missing or invalid 'type' field");
+            server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        } else if (!g_pyBridge.is_initialized()) {
+            auto err = build_error("get_all_infos: Python bridge not initialized");
+            server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        } else {
+            std::string result = g_dataExtractor.get_all_infos(info_type.c_str());
+            if (result.empty()) {
+                std::string msg = "get_all_infos: extraction failed for type '" + info_type + "'";
+                auto err = build_error(msg.c_str());
+                server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+            } else {
+                auto resp = build_response("ok", result.c_str());
+                server.send_message(resp.data(), static_cast<uint32_t>(resp.size()));
             }
         }
 
