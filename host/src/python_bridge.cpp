@@ -150,6 +150,10 @@ bool PythonBridge::init(HMODULE hGameDll, std::string& error_out) {
         return false;
     }
     m_tempFilePath = std::string(tmpDir) + "tessera_py_result.txt";
+    // Normalize backslashes to forward slashes for safe Python string embedding.
+    for (auto& c : m_tempFilePath) {
+        if (c == '\\') c = '/';
+    }
     fprintf(stderr, "[PyBridge] Temp file path: %s\n", m_tempFilePath.c_str());
 
     // Step 9: Done
