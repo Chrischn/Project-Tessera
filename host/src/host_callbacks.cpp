@@ -321,13 +321,6 @@ static int cb_xml_get_value_float(void* xml_ptr, float* val) {
 
 static int cb_xml_get_value_bool(void* xml_ptr, int* val) {
     cb_trace("cb_xml_get_value_bool");
-    // Log details near crash point
-    if (g_cbCallCount >= 107640 && g_cbCallCount <= 107650) {
-        fprintf(stderr, "[CB #%d] get_value_bool xml=%p val=%p node='%s'\n",
-            g_cbCallCount, xml_ptr, (void*)val,
-            xml_ptr ? static_cast<FXml*>(xml_ptr)->current_node.name() : "NULL");
-        fflush(stderr);
-    }
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
     if (text.empty()) return 0;
