@@ -86,6 +86,22 @@ def main():
                 if data:
                     print(f"[debug_client]   first: {data[0]}")
 
+            # Art info queries
+            for art_type in ["unit_art", "building_art"]:
+                print(f"[debug_client] Sending get_all_infos ({art_type})...")
+                send_msg(sock, {"cmd": "get_all_infos", "type": art_type})
+                resp = recv_msg(sock, timeout=60)
+                data = resp.get("data", []) if resp else []
+                print(f"[debug_client] get_all_infos({art_type}) -> {len(data)} items")
+                if data:
+                    print(f"[debug_client]   first: {data[0]}")
+
+            # Single art info lookup
+            print("[debug_client] Sending get_art_info (unit, ART_DEF_UNIT_WARRIOR)...")
+            send_msg(sock, {"cmd": "get_art_info", "type": "unit", "key": "ART_DEF_UNIT_WARRIOR"})
+            resp = recv_msg(sock, timeout=60)
+            print(f"[debug_client] get_art_info -> {resp}")
+
     # Send shutdown
     print("[debug_client] Sending shutdown...")
     send_msg(sock, {"cmd": "shutdown"})

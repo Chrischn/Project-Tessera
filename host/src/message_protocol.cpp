@@ -362,6 +362,38 @@ void dispatch_command(const char* json, uint32_t len,
             }
         }
 
+    } else if (cmd == "get_art_info") {
+        // Parse "type" and "key" fields from the incoming JSON
+        yyjson_doc* req_doc = yyjson_read(json, static_cast<size_t>(len), 0);
+        yyjson_val* req_root = req_doc ? yyjson_doc_get_root(req_doc) : nullptr;
+        yyjson_val* type_val = req_root ? yyjson_obj_get(req_root, "type") : nullptr;
+        yyjson_val* key_val  = req_root ? yyjson_obj_get(req_root, "key")  : nullptr;
+
+        std::string art_type, art_key;
+        if (type_val && yyjson_is_str(type_val))
+            art_type = yyjson_get_str(type_val);
+        if (key_val && yyjson_is_str(key_val))
+            art_key = yyjson_get_str(key_val);
+        if (req_doc) yyjson_doc_free(req_doc);
+
+        if (art_type.empty() || art_key.empty()) {
+            auto err = build_error("get_art_info: missing 'type' or 'key' field");
+            server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        } else if (!g_pyBridge.is_initialized()) {
+            auto err = build_error("get_art_info: Python bridge not initialized");
+            server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+        } else {
+            std::string result = g_dataExtractor.get_art_info(art_type.c_str(), art_key.c_str());
+            if (result.empty()) {
+                std::string msg = "get_art_info: not found (" + art_type + ", " + art_key + ")";
+                auto err = build_error(msg.c_str());
+                server.send_message(err.data(), static_cast<uint32_t>(err.size()));
+            } else {
+                auto resp = build_response("ok", result.c_str());
+                server.send_message(resp.data(), static_cast<uint32_t>(resp.size()));
+            }
+        }
+
     } else if (cmd == "shutdown") {
         auto resp = build_response("ok");
         server.send_message(resp.data(), static_cast<uint32_t>(resp.size()));

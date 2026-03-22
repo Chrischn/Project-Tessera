@@ -39,4 +39,11 @@ private:
 
     // Shared helper for info types with only a "type" field (promotion, bonus, etc.)
     std::string extract_simple_infos(const char* pyCountMethod, const char* pyGetMethod);
+
+    // Art info extractors — iterate CyGlobalContext art info arrays
+    std::string extract_unit_art();
+    std::string extract_building_art();
+
+    // Single art info lookup helpers
+    std::string lookup_art_info(const char* artMgrMethod, const char* key);
 };
