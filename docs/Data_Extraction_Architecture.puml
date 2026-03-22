@@ -1,0 +1,132 @@
+@startuml Data Extraction Architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle rectangle
+skinparam defaultFontSize 12
+skinparam noteFontSize 11
+skinparam packageStyle frame
+
+title **Data Extraction Architecture**\n<size:11>Boost.Python bridge: embed Python 2.4 to query CvGameCoreDLL after XML loading</size>
+
+' ─── External Systems ───
+rectangle "**Godot 4.5**\n(GDScript)" as Godot #E8F5E9 {
+  component "VFS.gd" as VFS
+  component "NIF Pipeline\n(GDExtension)" as NIF
+}
+
+' ─── Communication Layer ───
+rectangle "**TCP Bridge**" as Bridge #E3F2FD {
+  component "Python Test Client\n(debug_init_client.py)" as PyClient
+  component "JSON over TCP\nport 12345" as TCP
+}
+
+' ─── TesseraHost Process (x86, VS2022) ───
+rectangle "**TesseraHost.exe** (x86, VS2022)" as Host #FFF3E0 {
+
+  component "**message_protocol.cpp**\nCommand Dispatch\n(get_info, get_all_infos, get_art_info)" as Proto
+
+  component "**DataExtractor**\n<size:10>data_extractor.h/cpp</size>\nBuilds Python scripts, runs via\nPyRun_SimpleString, parses results" as DE #FFECB3
+
+  component "**DllLoader**\ndll_loader.h/cpp" as DLL
+}
+
+' ─── Python 2.4 (in-process) ───
+rectangle "**Embedded Python 2.4**  (in-process)" as PyEngine #E8EAF6 {
+
+  component "**Py_Initialize()**\nfrom python24.dll\n(loaded as CvGameCoreDLL dependency)" as PyInit
+
+  component "**boost::python::detail::init_module()**\nfrom boost_python-vc71-mt-1_32.dll\nCreates \"CvPythonExtensions\" module\nwith correct Boost.Python scope" as BoostInit
+
+  component "**DLLPublishToPython()**\nfrom CvGameCoreDLL.dll\nRegisters 1,331 methods:\nCyGlobalContext, CvUnitInfo,\nCvBuildingInfo, CvTechInfo, ..." as Publish
+}
+
+' ─── Game DLL ───
+rectangle "**CvGameCoreDLL.dll** (VS2003 x86)" as GameDLL #FFEBEE {
+
+  package "CyGlobalContext  (Boost.Python wrapper)" as CyGC #C8E6C9 {
+    component "getNumUnitInfos()" as CyNU
+    component "getUnitInfo(i) -> CvUnitInfo*" as CyUI
+    component "getNumBuildingInfos()" as CyNB
+    component "getBuildingInfo(i) -> CvBuildingInfo*" as CyBI
+    component "getNumTechInfos()" as CyNT
+    component "getTechInfo(i) -> CvTechInfo*" as CyTI
+    component "... all info types ..." as CyMore
+    note as ModNote #FFFFCC
+      **Mod-compatible by design:**
+      Every mod DLL compiles its own
+      CyGlobalContext with its own class
+      layout offsets. DLLPublishToPython
+      is part of the standard SDK.
+    end note
+  }
+
+  package "CvInfo*  (1,331 Python-exposed properties)" as InfoClasses #C8E6C9 {
+    component "CvUnitInfo: getType, getCombat,\ngetMoves, getProductionCost, ..." as UIProps
+    component "CvBuildingInfo: getType, getCost,\ngetArtDefineTag, ..." as BIProps
+    component "CvTechInfo: getType, getResearchCost,\ngetEra, ..." as TIProps
+    component "CvArtInfoUnit: getNIF, getKFM,\ngetScale, ..." as AIProps
+  }
+
+  package "CvGlobals (internal)" as GlobInternal #FFF9C4 {
+    component "m_paUnitInfo[]" as VecU
+    component "m_paBuildingInfo[]" as VecB
+    component "m_paTechInfo[]" as VecT
+    component "... all info vectors ..." as VecMore
+  }
+}
+
+' ─── TesseraRelay ───
+rectangle "**TesseraRelay.dll** (VS2003)\n<size:10>Unchanged — XML callback shim only</size>" as Relay #F5F5F5 {
+  component "CvDLLUtilityIFaceBase\n(XML loading callbacks)" as RelayIface
+}
+
+' ─── Connections ───
+Godot -down-> TCP : get_info\nget_all_infos\nget_art_info
+PyClient -down-> TCP : test queries
+TCP -down-> Proto
+
+Proto -right-> DE : route\nquery cmds
+DE -down-> PyEngine : build Python script\nPyRun_SimpleString()
+
+PyInit -down-> BoostInit : step 1 -> step 2
+BoostInit -down-> Publish : step 2 calls\nDLLPublishToPython\nas callback
+
+Publish -down-> CyGC : registers\nwrappers
+Publish -down-> InfoClasses : registers\nproperties
+
+CyGC -down-> GlobInternal : wraps inline\ngetters\n(correct offsets\nfor THIS DLL)
+
+DLL -down-> Relay : loads + wires\nsetDLLIFace()
+Relay -down-> GameDLL : provides\nCvDLLUtilityIFaceBase\n(virtual interface)
+GameDLL -up-> RelayIface : calls during\nXML loading\n(callbacks)
+
+' ─── Notes ───
+note right of PyEngine
+  **Verified (2026-03-22)**
+  - Py_Initialize works in VS2022 host
+  - boost init_module sets Boost.Python scope
+  - DLLPublishToPython registers all bindings
+  - CyGlobalContext queries return real data:
+    159 buildings, 92 techs, 54 promotions
+end note
+
+
+' ─── Legend ───
+legend bottom left
+  |= Color |= Meaning |
+  | <#C8E6C9> | Accessible via Boost.Python (ALL info types, ALL properties) |
+  | <#FFF9C4> | Internal CvGlobals state (accessed through Boost.Python wrappers) |
+  | <#FFECB3> | TesseraHost data extraction layer |
+  | <#E8EAF6> | Embedded Python 2.4 (already loaded as DLL dependency) |
+  | <#F5F5F5> | Unchanged (relay stays minimal — XML shim only) |
+
+  **Key Insight:**
+  CvGameCoreDLL was designed for Python modding — it exports
+  DLLPublishToPython() which registers comprehensive Boost.Python
+  bindings for ALL game data. We embed Python 2.4 (already in-process
+  as a DLL dependency) and use these bindings directly. No relay
+  changes needed. No GetProcAddress for mangled C++ names.
+  100% mod-compatible because every mod DLL includes the same bindings.
+end legend
+
+@enduml
