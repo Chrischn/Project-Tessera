@@ -68,6 +68,29 @@ func _ready() -> void:
 		if result.get("status") == "ok":
 			print("[Init] XML data loaded in %d ms" % xml_time)
 			print("[Init] Game logic initialized successfully (total: %d ms / %.1f s)" % [total_time, total_time / 1000.0])
+
+			# --- Quick data query test ---
+			var tech_result = await Global.host_bridge.get_all_infos("tech")
+			if tech_result.get("status") == "ok":
+				var techs = tech_result.get("data", [])
+				print("[Init] Techs loaded: %d" % techs.size())
+				if techs.size() > 0:
+					print("[Init]   First: %s" % str(techs[0]))
+
+			var building_result = await Global.host_bridge.get_all_infos("building")
+			if building_result.get("status") == "ok":
+				var buildings = building_result.get("data", [])
+				print("[Init] Buildings loaded: %d" % buildings.size())
+				if buildings.size() > 0:
+					print("[Init]   First: %s" % str(buildings[0]))
+
+			var info_result = await Global.host_bridge.get_info("tech", "TECH_MYSTICISM")
+			if info_result.get("status") == "ok":
+				print("[Init] TECH_MYSTICISM: %s" % str(info_result.get("data")))
+
+			var era_result = await Global.host_bridge.get_all_infos("era")
+			if era_result.get("status") == "ok":
+				print("[Init] Eras: %d" % era_result.get("data", []).size())
 		else:
 			push_error("[Init] Host init failed: " + str(result.get("message", "unknown")))
 	else:

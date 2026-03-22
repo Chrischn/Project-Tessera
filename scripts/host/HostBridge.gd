@@ -107,33 +107,25 @@ func init_game(base_path: String, mod = null) -> Dictionary:
 	var cmd := {"cmd": "init", "base_path": base_path}
 	if mod != null and mod is String and not (mod as String).is_empty():
 		cmd["mod"] = mod
-	_send_raw(cmd)
-	var result = await _recv_raw(INIT_TIMEOUT)
-	return result
+	return await _send_and_recv(cmd, INIT_TIMEOUT)
 
 
 ## Query a single info record by type and key.
 ## Example: get_info("tech", "TECH_AGRICULTURE")
 func get_info(type: String, key: String) -> Dictionary:
-	_send_raw({"cmd": "get_info", "type": type, "key": key})
-	var result = await _recv_raw(QUERY_TIMEOUT)
-	return result
+	return await _send_and_recv({"cmd": "get_info", "type": type, "key": key}, QUERY_TIMEOUT)
 
 
 ## Query all info records for a given type.
 ## Example: get_all_infos("tech") → {"status":"ok","type":"tech","count":86,"items":[...]}
 func get_all_infos(type: String) -> Dictionary:
-	_send_raw({"cmd": "get_all_infos", "type": type})
-	var result = await _recv_raw(QUERY_TIMEOUT)
-	return result
+	return await _send_and_recv({"cmd": "get_all_infos", "type": type}, QUERY_TIMEOUT)
 
 
 ## Query art info by type and key.
 ## Example: get_art_info("unit_art", "ART_DEF_UNIT_WARRIOR")
 func get_art_info(type: String, key: String) -> Dictionary:
-	_send_raw({"cmd": "get_art_info", "type": type, "key": key})
-	var result = await _recv_raw(QUERY_TIMEOUT)
-	return result
+	return await _send_and_recv({"cmd": "get_art_info", "type": type, "key": key}, QUERY_TIMEOUT)
 
 
 ## Gracefully shut down the host process.
@@ -187,6 +179,36 @@ func _resolve_host_path() -> String:
 		return ProjectSettings.globalize_path("res://host/build/Debug/TesseraHost.exe")
 	else:
 		return OS.get_executable_path().get_base_dir().path_join("TesseraHost.exe")
+
+
+## Send a command and receive the response, pausing health pings to prevent
+## ping responses from interleaving with query responses in the TCP stream.
+func _send_and_recv(cmd: Dictionary, timeout_sec: float) -> Dictionary:
+	# Pause health pings so no ping response can appear in the buffer
+	if _health_timer:
+		_health_timer.stop()
+	# Drain any stale ping responses sitting in the buffer
+	_drain_stale_responses()
+	_send_raw(cmd)
+	var result = await _recv_raw(timeout_sec)
+	# Resume health pings
+	if _health_timer:
+		_health_timer.start()
+	return result
+
+
+## Drain any buffered responses (e.g., from pings sent before we paused).
+func _drain_stale_responses() -> void:
+	if _tcp == null or not _connected:
+		return
+	_tcp.poll()
+	while _tcp.get_available_bytes() >= 4:
+		var length := _tcp.get_32()
+		if length > 0 and length < 64 * 1024 * 1024:
+			var result := _tcp.get_data(length)
+			if result[0] == OK:
+				print("[HostBridge] Drained stale response (%d bytes)" % length)
+		_tcp.poll()
 
 
 func _send_raw(cmd: Dictionary) -> void:
