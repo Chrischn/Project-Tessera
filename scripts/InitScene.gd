@@ -84,13 +84,26 @@ func _ready() -> void:
 				if buildings.size() > 0:
 					print("[Init]   First: %s" % str(buildings[0]))
 
-			var info_result = await Global.host_bridge.get_info("tech", "TECH_MYSTICISM")
-			if info_result.get("status") == "ok":
-				print("[Init] TECH_MYSTICISM: %s" % str(info_result.get("data")))
+			var unit_result = await Global.host_bridge.get_all_infos("unit")
+			if unit_result.get("status") == "ok":
+				var units = unit_result.get("data", [])
+				print("[Init] Units loaded: %d" % units.size())
+				if units.size() > 0:
+					print("[Init]   First: %s" % str(units[0]))
+
+			var civ_result = await Global.host_bridge.get_all_infos("civilization")
+			if civ_result.get("status") == "ok":
+				print("[Init] Civilizations loaded: %d" % civ_result.get("data", []).size())
 
 			var era_result = await Global.host_bridge.get_all_infos("era")
 			if era_result.get("status") == "ok":
 				print("[Init] Eras: %d" % era_result.get("data", []).size())
+
+			var art_result = await Global.host_bridge.get_art_info("unit", "ART_DEF_UNIT_WARRIOR")
+			if art_result.get("status") == "ok":
+				print("[Init] ART_DEF_UNIT_WARRIOR: %s" % str(art_result.get("data")))
+			else:
+				print("[Init] Art lookup: %s" % str(art_result.get("message", "failed")))
 		else:
 			push_error("[Init] Host init failed: " + str(result.get("message", "unknown")))
 	else:
