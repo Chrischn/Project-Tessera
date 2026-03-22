@@ -48,16 +48,26 @@ func _ready() -> void:
 	find_child("ProgressText").text = "Init Game Logic"
 	await get_tree().process_frame
 
+	var host_start_time := Time.get_ticks_msec()
+
 	Global.host_bridge = HostBridge.new()
 	add_child(Global.host_bridge)  # Must be in tree for _process() and timers
 	Global.host_bridge.connection_lost.connect(_on_host_connection_lost)
 
 	if await Global.host_bridge.spawn_host():
+		var spawn_time := Time.get_ticks_msec() - host_start_time
+		print("[Init] Host spawned + connected in %d ms" % spawn_time)
+
 		find_child("ProgressText").text = "Loading XML Data"
 		await get_tree().process_frame
+		var xml_start_time := Time.get_ticks_msec()
 		var result = await Global.host_bridge.init_game(base_path)
+		var xml_time := Time.get_ticks_msec() - xml_start_time
+		var total_time := Time.get_ticks_msec() - host_start_time
+
 		if result.get("status") == "ok":
-			print("[Init] Game logic initialized successfully")
+			print("[Init] XML data loaded in %d ms" % xml_time)
+			print("[Init] Game logic initialized successfully (total: %d ms / %.1f s)" % [total_time, total_time / 1000.0])
 		else:
 			push_error("[Init] Host init failed: " + str(result.get("message", "unknown")))
 	else:
