@@ -76,6 +76,16 @@ def main():
             if data:
                 print(f"[debug_client]   first: {data[0]}")
 
+            # Test remaining info types
+            for info_type in ["building", "unit", "promotion", "bonus", "civilization", "era"]:
+                print(f"[debug_client] Sending get_all_infos ({info_type})...")
+                send_msg(sock, {"cmd": "get_all_infos", "type": info_type})
+                resp = recv_msg(sock, timeout=60)
+                data = resp.get("data", []) if resp else []
+                print(f"[debug_client] get_all_infos({info_type}) -> {len(data)} items")
+                if data:
+                    print(f"[debug_client]   first: {data[0]}")
+
     # Send shutdown
     print("[debug_client] Sending shutdown...")
     send_msg(sock, {"cmd": "shutdown"})

@@ -34,4 +34,9 @@ private:
 
     // Build and run a Python 2.4 script for extracting all infos of a type.
     std::string extract_techs();
+    std::string extract_buildings();
+    std::string extract_units();
+
+    // Shared helper for info types with only a "type" field (promotion, bonus, etc.)
+    std::string extract_simple_infos(const char* pyCountMethod, const char* pyGetMethod);
 };
