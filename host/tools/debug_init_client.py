@@ -60,74 +60,67 @@ def main():
     print(f"[debug_client] init -> {resp}")
 
     if resp and resp.get("status") == "ok":
-        # Send pytest command — PoC for Python 2.4 embedding + data extraction
-        print("[debug_client] Sending pytest (Python data extraction PoC)...")
-        send_msg(sock, {"cmd": "pytest"})
+        # Test get_all_infos for tech
+        print("[debug_client] Sending get_all_infos (tech)...")
+        send_msg(sock, {"cmd": "get_all_infos", "type": "tech"})
         resp = recv_msg(sock, timeout=60)
-        print(f"[debug_client] pytest -> {resp}")
+        data = resp.get("data", []) if resp else []
+        print(f"[debug_client] get_all_infos(tech) -> {len(data)} items")
+        if data:
+            print(f"[debug_client]   first: {data[0]}")
 
-        if resp and resp.get("status") == "ok":
-            # Test get_all_infos for tech
-            print("[debug_client] Sending get_all_infos (tech)...")
-            send_msg(sock, {"cmd": "get_all_infos", "type": "tech"})
+        # Test remaining info types
+        for info_type in ["building", "unit", "promotion", "bonus", "civilization", "era"]:
+            print(f"[debug_client] Sending get_all_infos ({info_type})...")
+            send_msg(sock, {"cmd": "get_all_infos", "type": info_type})
             resp = recv_msg(sock, timeout=60)
             data = resp.get("data", []) if resp else []
-            print(f"[debug_client] get_all_infos(tech) -> {len(data)} items")
+            print(f"[debug_client] get_all_infos({info_type}) -> {len(data)} items")
             if data:
                 print(f"[debug_client]   first: {data[0]}")
 
-            # Test remaining info types
-            for info_type in ["building", "unit", "promotion", "bonus", "civilization", "era"]:
-                print(f"[debug_client] Sending get_all_infos ({info_type})...")
-                send_msg(sock, {"cmd": "get_all_infos", "type": info_type})
-                resp = recv_msg(sock, timeout=60)
-                data = resp.get("data", []) if resp else []
-                print(f"[debug_client] get_all_infos({info_type}) -> {len(data)} items")
-                if data:
-                    print(f"[debug_client]   first: {data[0]}")
-
-            # Art info queries
-            for art_type in ["unit_art", "building_art"]:
-                print(f"[debug_client] Sending get_all_infos ({art_type})...")
-                send_msg(sock, {"cmd": "get_all_infos", "type": art_type})
-                resp = recv_msg(sock, timeout=60)
-                data = resp.get("data", []) if resp else []
-                print(f"[debug_client] get_all_infos({art_type}) -> {len(data)} items")
-                if data:
-                    print(f"[debug_client]   first: {data[0]}")
-
-            # Single art info lookup
-            print("[debug_client] Sending get_art_info (unit, ART_DEF_UNIT_WARRIOR)...")
-            send_msg(sock, {"cmd": "get_art_info", "type": "unit", "key": "ART_DEF_UNIT_WARRIOR"})
+        # Art info queries
+        for art_type in ["unit_art", "building_art"]:
+            print(f"[debug_client] Sending get_all_infos ({art_type})...")
+            send_msg(sock, {"cmd": "get_all_infos", "type": art_type})
             resp = recv_msg(sock, timeout=60)
-            print(f"[debug_client] get_art_info -> {resp}")
+            data = resp.get("data", []) if resp else []
+            print(f"[debug_client] get_all_infos({art_type}) -> {len(data)} items")
+            if data:
+                print(f"[debug_client]   first: {data[0]}")
 
-            # Single info lookup
-            print("[debug_client] Sending get_info (tech, TECH_MYSTICISM)...")
-            send_msg(sock, {"cmd": "get_info", "type": "tech", "key": "TECH_MYSTICISM"})
-            resp = recv_msg(sock, timeout=60)
-            print(f"[debug_client] get_info -> {resp}")
+        # Single art info lookup
+        print("[debug_client] Sending get_art_info (unit, ART_DEF_UNIT_WARRIOR)...")
+        send_msg(sock, {"cmd": "get_art_info", "type": "unit", "key": "ART_DEF_UNIT_WARRIOR"})
+        resp = recv_msg(sock, timeout=60)
+        print(f"[debug_client] get_art_info -> {resp}")
 
-            print("[debug_client] Sending get_info (building, BUILDING_PALACE)...")
-            send_msg(sock, {"cmd": "get_info", "type": "building", "key": "BUILDING_PALACE"})
-            resp = recv_msg(sock, timeout=60)
-            print(f"[debug_client] get_info -> {resp}")
+        # Single info lookup
+        print("[debug_client] Sending get_info (tech, TECH_MYSTICISM)...")
+        send_msg(sock, {"cmd": "get_info", "type": "tech", "key": "TECH_MYSTICISM"})
+        resp = recv_msg(sock, timeout=60)
+        print(f"[debug_client] get_info -> {resp}")
 
-            print("[debug_client] Sending get_info (unit, UNIT_WARRIOR)...")
-            send_msg(sock, {"cmd": "get_info", "type": "unit", "key": "UNIT_WARRIOR"})
-            resp = recv_msg(sock, timeout=60)
-            print(f"[debug_client] get_info -> {resp}")
+        print("[debug_client] Sending get_info (building, BUILDING_PALACE)...")
+        send_msg(sock, {"cmd": "get_info", "type": "building", "key": "BUILDING_PALACE"})
+        resp = recv_msg(sock, timeout=60)
+        print(f"[debug_client] get_info -> {resp}")
 
-            print("[debug_client] Sending get_info (promotion, PROMOTION_COMBAT1)...")
-            send_msg(sock, {"cmd": "get_info", "type": "promotion", "key": "PROMOTION_COMBAT1"})
-            resp = recv_msg(sock, timeout=60)
-            print(f"[debug_client] get_info -> {resp}")
+        print("[debug_client] Sending get_info (unit, UNIT_WARRIOR)...")
+        send_msg(sock, {"cmd": "get_info", "type": "unit", "key": "UNIT_WARRIOR"})
+        resp = recv_msg(sock, timeout=60)
+        print(f"[debug_client] get_info -> {resp}")
 
-            # Test not-found case
-            print("[debug_client] Sending get_info (tech, TECH_NONEXISTENT)...")
-            send_msg(sock, {"cmd": "get_info", "type": "tech", "key": "TECH_NONEXISTENT"})
-            resp = recv_msg(sock, timeout=60)
-            print(f"[debug_client] get_info (not found) -> {resp}")
+        print("[debug_client] Sending get_info (promotion, PROMOTION_COMBAT1)...")
+        send_msg(sock, {"cmd": "get_info", "type": "promotion", "key": "PROMOTION_COMBAT1"})
+        resp = recv_msg(sock, timeout=60)
+        print(f"[debug_client] get_info -> {resp}")
+
+        # Test not-found case
+        print("[debug_client] Sending get_info (tech, TECH_NONEXISTENT)...")
+        send_msg(sock, {"cmd": "get_info", "type": "tech", "key": "TECH_NONEXISTENT"})
+        resp = recv_msg(sock, timeout=60)
+        print(f"[debug_client] get_info (not found) -> {resp}")
 
     # Send shutdown
     print("[debug_client] Sending shutdown...")

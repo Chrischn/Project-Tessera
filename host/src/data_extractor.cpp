@@ -292,11 +292,7 @@ std::string DataExtractor::get_art_info(const char* type, const char* key) {
 // extract_techs — run Python 2.4 script, parse TSV, build JSON array
 // ---------------------------------------------------------------------------
 std::string DataExtractor::extract_techs() {
-    // Build the temp file path with forward slashes for Python
     std::string tempPath = m_bridge->get_temp_file_path();
-    for (auto& c : tempPath) {
-        if (c == '\\') c = '/';
-    }
 
     // Python 2.4 script: iterate all tech infos, write TAB-separated values
     // Fields: type (str), research_cost (int), era (int)
