@@ -44,3 +44,6 @@ extensions/src/gdext_niflib/gdext_niflib.windows.template_debug.x86_64.obj
 CLAUDE.md
 .claude/
 docs/superpowers/
+host/build/
+host/bin/*.exp
+host/bin/*.lib

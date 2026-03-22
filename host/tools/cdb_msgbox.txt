@@ -1,0 +1,17 @@
+.echo ============================================
+.echo  CDB — Break on SetVariableListTagPair error
+.echo ============================================
+lmf
+
+* Break on int 3 from MessageBox stub: dump registers, raw stack with symbols,
+* and disassembly around game DLL return addresses
+sxe -c ".echo ===ALLOC_ZERO_BREAK===;r;.echo ---RAW_STACK---;dds @esp L200;.echo ===END===;q" bpe
+
+* Pass AVs to SEH
+sxe -c "gN" av
+
+* On process exit, quit
+sxe -c "q" epr
+
+.echo === Continuing ===
+g

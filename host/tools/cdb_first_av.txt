@@ -1,0 +1,6 @@
+.echo === CDB: Stop on first AV ===
+lmf
+sxe -c ".echo ===AV===;.exr -1;r;kbn 50;.echo ---DISASM---;u @eip-10 L20;.echo ===END===;q" av
+sxe -c "gN" bpe
+sxe -c "q" epr
+g

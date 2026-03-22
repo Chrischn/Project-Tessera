@@ -1,0 +1,114 @@
+@startuml Data Extraction Sequence
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam sequenceMessageAlign center
+skinparam defaultFontSize 12
+
+title **Data Extraction — Command Flow**\n<size:11>Via embedded Python 2.4 + Boost.Python bindings</size>
+
+participant "Python Client\nor Godot" as Client #E3F2FD
+participant "TcpServer" as TCP #E3F2FD
+participant "dispatch_command\n(message_protocol)" as Proto #FFF3E0
+participant "DataExtractor" as DE #FFECB3
+participant "Embedded\nPython 2.4" as Py #E8EAF6
+participant "CvGameCoreDLL\nBoost.Python layer" as DLL #FFEBEE
+
+== One-Time Setup (after XML loading, before first query) ==
+
+Proto -> DE : init_python()
+
+DE -> Py : GetModuleHandle("python24.dll")\n+ GetProcAddress("Py_Initialize")
+Py --> DE : function pointers
+
+DE -> Py : Py_Initialize()
+Py --> DE : interpreter ready
+
+DE -> Py : GetModuleHandle("boost_python-vc71-mt-1_32.dll")\n+ GetProcAddress("init_module")
+Py --> DE : init_module function
+
+DE -> Py : boost::python::detail::init_module(\n  "CvPythonExtensions",\n  DLLPublishToPython)
+Py -> DLL : DLLPublishToPython()
+note right: Registers 1,331 methods:\nCyGlobalContext, CvUnitInfo,\nCvBuildingInfo, CvTechInfo,\nCvPromotionInfo, CvArtInfoUnit, ...
+DLL --> Py : bindings registered
+Py --> DE : module ready
+
+...
+
+== Query: Get All Tech Infos ==
+
+Client -> TCP : {"cmd":"get_all_infos",\n "type":"tech"}
+TCP -> Proto : dispatch
+Proto -> DE : get_all_infos("tech")
+
+DE -> Py : PyRun_SimpleString(extraction script)
+
+Py -> DLL : gc.getNumTechInfos()
+note right: CyGlobalContext::getNumTechInfos()\ncalls GC.getNumTechInfos()\n(inline, compiled with correct offsets)
+DLL --> Py : 92
+
+loop i = 0..91
+  Py -> DLL : gc.getTechInfo(i)
+  DLL --> Py : CvTechInfo*
+  Py -> DLL : getType(), getResearchCost(), getEra()
+  DLL --> Py : fields
+end
+
+Py --> DE : TSV result (temp file)
+
+DE --> Proto : parsed JSON (via yyjson)
+Proto --> TCP : {"status":"ok","data":[\n  {"type":"TECH_MYSTICISM","cost":50,"era":0},\n  {"type":"TECH_MEDITATION","cost":80,"era":0},\n  {"type":"TECH_POLYTHEISM","cost":100,"era":0},\n  ...92 total...]}
+TCP --> Client : response
+
+...
+
+== Query: Get Specific Art Info ==
+
+Client -> TCP : {"cmd":"get_art_info",\n "type":"unit",\n "key":"ART_DEF_UNIT_WARRIOR"}
+TCP -> Proto : dispatch
+Proto -> DE : get_art_info("unit", "ART_DEF_UNIT_WARRIOR")
+
+DE -> Py : PyRun_SimpleString(lookup script)
+
+Py -> DLL : CyArtFileMgr().getUnitArtInfo("ART_DEF_UNIT_WARRIOR")
+DLL --> Py : CvArtInfoUnit*
+Py -> DLL : info.getNIF()
+DLL --> Py : "Art/Units/Warrior/Warrior.nif"
+Py -> DLL : info.getKFM()
+DLL --> Py : "Art/Units/Warrior/Warrior.kfm"
+Py -> DLL : info.getScale()
+DLL --> Py : 0.61
+
+Py --> DE : TSV result
+
+DE --> Proto : parsed JSON
+Proto --> TCP : {"status":"ok","data":{\n  "type":"ART_DEF_UNIT_WARRIOR",\n  "nif":"Art/Units/Warrior/Warrior.nif",\n  "kfm":"Art/Units/Warrior/Warrior.kfm",\n  "scale":0.61}}
+TCP --> Client : response
+
+...
+
+== Query: Single Info Lookup ==
+
+Client -> TCP : {"cmd":"get_info",\n "type":"tech",\n "key":"TECH_MYSTICISM"}
+TCP -> Proto : dispatch
+Proto -> DE : get_info("tech", "TECH_MYSTICISM")
+
+DE -> Py : PyRun_SimpleString(search script)
+
+Py -> DLL : iterate gc.getTechInfo(i)\nuntil getType() == "TECH_MYSTICISM"
+DLL --> Py : match found at index 0
+
+Py --> DE : TSV result (single line)
+
+DE --> Proto : parsed JSON (object, not array)
+Proto --> TCP : {"status":"ok","data":{\n  "type":"TECH_MYSTICISM",\n  "cost":50,\n  "era":0}}
+TCP --> Client : response
+
+note over Client, DLL
+  **Mod Compatibility:**
+  The same flow works for ANY mod DLL (Rise of Mankind, Caveman2Cosmos, etc.)
+  because every mod compiles its own DLLPublishToPython() with its own
+  Boost.Python bindings and class layout offsets. The Python queries call
+  into the loaded DLL's own compiled code — never hardcoded offsets.
+end note
+
+@enduml

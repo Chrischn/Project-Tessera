@@ -2,3 +2,9 @@
 [submodule "external/godot-cpp"]
 	path = external/godot-cpp
 	url = https://github.com/godotengine/godot-cpp.git
+[submodule "host/external/pugixml"]
+	path = host/external/pugixml
+	url = https://github.com/zeux/pugixml.git
+[submodule "host/external/yyjson"]
+	path = host/external/yyjson
+	url = https://github.com/ibireme/yyjson.git
