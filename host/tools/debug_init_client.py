@@ -102,6 +102,33 @@ def main():
             resp = recv_msg(sock, timeout=60)
             print(f"[debug_client] get_art_info -> {resp}")
 
+            # Single info lookup
+            print("[debug_client] Sending get_info (tech, TECH_MYSTICISM)...")
+            send_msg(sock, {"cmd": "get_info", "type": "tech", "key": "TECH_MYSTICISM"})
+            resp = recv_msg(sock, timeout=60)
+            print(f"[debug_client] get_info -> {resp}")
+
+            print("[debug_client] Sending get_info (building, BUILDING_PALACE)...")
+            send_msg(sock, {"cmd": "get_info", "type": "building", "key": "BUILDING_PALACE"})
+            resp = recv_msg(sock, timeout=60)
+            print(f"[debug_client] get_info -> {resp}")
+
+            print("[debug_client] Sending get_info (unit, UNIT_WARRIOR)...")
+            send_msg(sock, {"cmd": "get_info", "type": "unit", "key": "UNIT_WARRIOR"})
+            resp = recv_msg(sock, timeout=60)
+            print(f"[debug_client] get_info -> {resp}")
+
+            print("[debug_client] Sending get_info (promotion, PROMOTION_COMBAT1)...")
+            send_msg(sock, {"cmd": "get_info", "type": "promotion", "key": "PROMOTION_COMBAT1"})
+            resp = recv_msg(sock, timeout=60)
+            print(f"[debug_client] get_info -> {resp}")
+
+            # Test not-found case
+            print("[debug_client] Sending get_info (tech, TECH_NONEXISTENT)...")
+            send_msg(sock, {"cmd": "get_info", "type": "tech", "key": "TECH_NONEXISTENT"})
+            resp = recv_msg(sock, timeout=60)
+            print(f"[debug_client] get_info (not found) -> {resp}")
+
     # Send shutdown
     print("[debug_client] Sending shutdown...")
     send_msg(sock, {"cmd": "shutdown"})

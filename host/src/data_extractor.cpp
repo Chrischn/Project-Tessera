@@ -58,10 +58,207 @@ std::string DataExtractor::get_all_infos(const char* type) {
 }
 
 // ---------------------------------------------------------------------------
-// get_info — stub (Task 5)
+// get_info — single info lookup by type and key string
+// Returns a JSON object (not array) with the same fields as get_all_infos.
 // ---------------------------------------------------------------------------
-std::string DataExtractor::get_info(const char* /*type*/, const char* /*key*/) {
-    return {};
+std::string DataExtractor::get_info(const char* type, const char* key) {
+    if (!m_bridge || !m_bridge->is_initialized()) {
+        fprintf(stderr, "[DataExtractor] get_info: bridge not initialized\n");
+        return {};
+    }
+    if (!type || !key || type[0] == '\0' || key[0] == '\0') {
+        fprintf(stderr, "[DataExtractor] get_info: empty type or key\n");
+        return {};
+    }
+
+    // Map type to Python count/get methods and determine field layout
+    // Fields must match what get_all_infos returns for that type.
+    struct InfoType {
+        const char* countMethod;
+        const char* getMethod;
+        const char* writeFormat;  // Python format string for f.write()
+        int fieldCount;           // number of tab-separated fields (including type)
+    };
+
+    InfoType info = {};
+    bool found = false;
+
+    if (strcmp(type, "tech") == 0) {
+        info = {"getNumTechInfos", "getTechInfo",
+                "'%s\\t%d\\t%d\\n' % (info.getType(), info.getResearchCost(), info.getEra())", 3};
+        found = true;
+    } else if (strcmp(type, "building") == 0) {
+        info = {"getNumBuildingInfos", "getBuildingInfo",
+                "'%s\\t%d\\t%s\\n' % (info.getType(), info.getProductionCost(), info.getArtDefineTag())", 3};
+        found = true;
+    } else if (strcmp(type, "unit") == 0) {
+        info = {"getNumUnitInfos", "getUnitInfo",
+                "'%s\\t%d\\t%d\\t%d\\n' % (info.getType(), info.getCombat(), info.getMoves(), info.getProductionCost())", 4};
+        found = true;
+    } else if (strcmp(type, "promotion") == 0) {
+        info = {"getNumPromotionInfos", "getPromotionInfo", "'%s\\n' % info.getType()", 1};
+        found = true;
+    } else if (strcmp(type, "bonus") == 0) {
+        info = {"getNumBonusInfos", "getBonusInfo", "'%s\\n' % info.getType()", 1};
+        found = true;
+    } else if (strcmp(type, "civilization") == 0) {
+        info = {"getNumCivilizationInfos", "getCivilizationInfo", "'%s\\n' % info.getType()", 1};
+        found = true;
+    } else if (strcmp(type, "era") == 0) {
+        info = {"getNumEraInfos", "getEraInfo", "'%s\\n' % info.getType()", 1};
+        found = true;
+    }
+
+    if (!found) {
+        fprintf(stderr, "[DataExtractor] get_info: unknown type '%s'\n", type);
+        return {};
+    }
+
+    std::string tempPath = m_bridge->get_temp_file_path();
+    std::string keyStr(key);
+
+    // Build Python 2.4 script: iterate all infos of the given type,
+    // write the matching one to the temp file, then break.
+    std::string script =
+        "try:\n"
+        "    from CvPythonExtensions import *\n"
+        "    gc = CyGlobalContext()\n"
+        "    target = '" + keyStr + "'\n"
+        "    f = open('" + tempPath + "', 'w')\n"
+        "    found = 0\n"
+        "    for i in range(gc." + std::string(info.countMethod) + "()):\n"
+        "        info = gc." + std::string(info.getMethod) + "(i)\n"
+        "        if info and info.getType() == target:\n"
+        "            f.write(" + std::string(info.writeFormat) + ")\n"
+        "            found = 1\n"
+        "            break\n"
+        "    if not found:\n"
+        "        f.write('NOT_FOUND\\n')\n"
+        "    f.close()\n"
+        "except Exception, e:\n"
+        "    f2 = open('" + tempPath + "', 'w')\n"
+        "    f2.write('ERROR: %s\\n' % str(e))\n"
+        "    f2.close()\n";
+
+    fprintf(stderr, "[DataExtractor] get_info(%s, %s): running script...\n", type, key);
+    std::string result = m_bridge->run_script_with_output(script.c_str());
+
+    if (result.empty()) {
+        fprintf(stderr, "[DataExtractor] get_info: empty result\n");
+        return {};
+    }
+
+    if (result.rfind("ERROR:", 0) == 0) {
+        fprintf(stderr, "[DataExtractor] get_info: script error: %s\n", result.c_str());
+        return {};
+    }
+
+    if (result.rfind("NOT_FOUND", 0) == 0) {
+        fprintf(stderr, "[DataExtractor] get_info: key not found: %s\n", key);
+        return {};
+    }
+
+    // Strip trailing newline/CR
+    std::string line = result;
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+        line.pop_back();
+
+    // Build JSON object based on type
+    yyjson_mut_doc* doc = yyjson_mut_doc_new(nullptr);
+    yyjson_mut_val* obj = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, obj);
+
+    if (strcmp(type, "tech") == 0) {
+        // type \t cost \t era
+        size_t tab1 = line.find('\t');
+        size_t tab2 = (tab1 != std::string::npos) ? line.find('\t', tab1 + 1) : std::string::npos;
+        if (tab1 == std::string::npos || tab2 == std::string::npos) {
+            yyjson_mut_doc_free(doc);
+            fprintf(stderr, "[DataExtractor] get_info(tech): parse error: %s\n", line.c_str());
+            return {};
+        }
+        std::string type_str = line.substr(0, tab1);
+        int cost = 0, era = 0;
+        try {
+            cost = std::stoi(line.substr(tab1 + 1, tab2 - tab1 - 1));
+            era  = std::stoi(line.substr(tab2 + 1));
+        } catch (...) {
+            yyjson_mut_doc_free(doc);
+            fprintf(stderr, "[DataExtractor] get_info(tech): int parse error: %s\n", line.c_str());
+            return {};
+        }
+        yyjson_mut_obj_add_strcpy(doc, obj, "type", type_str.c_str());
+        yyjson_mut_obj_add_int(doc, obj, "cost", cost);
+        yyjson_mut_obj_add_int(doc, obj, "era", era);
+
+    } else if (strcmp(type, "building") == 0) {
+        // type \t productionCost \t artDefineTag
+        size_t tab1 = line.find('\t');
+        size_t tab2 = (tab1 != std::string::npos) ? line.find('\t', tab1 + 1) : std::string::npos;
+        if (tab1 == std::string::npos || tab2 == std::string::npos) {
+            yyjson_mut_doc_free(doc);
+            fprintf(stderr, "[DataExtractor] get_info(building): parse error: %s\n", line.c_str());
+            return {};
+        }
+        std::string type_str = line.substr(0, tab1);
+        int cost = 0;
+        try {
+            cost = std::stoi(line.substr(tab1 + 1, tab2 - tab1 - 1));
+        } catch (...) {
+            yyjson_mut_doc_free(doc);
+            fprintf(stderr, "[DataExtractor] get_info(building): int parse error: %s\n", line.c_str());
+            return {};
+        }
+        std::string art_str = line.substr(tab2 + 1);
+        yyjson_mut_obj_add_strcpy(doc, obj, "type", type_str.c_str());
+        yyjson_mut_obj_add_int(doc, obj, "productionCost", cost);
+        yyjson_mut_obj_add_strcpy(doc, obj, "artDefineTag", art_str.c_str());
+
+    } else if (strcmp(type, "unit") == 0) {
+        // type \t combat \t moves \t cost
+        size_t tab1 = line.find('\t');
+        size_t tab2 = (tab1 != std::string::npos) ? line.find('\t', tab1 + 1) : std::string::npos;
+        size_t tab3 = (tab2 != std::string::npos) ? line.find('\t', tab2 + 1) : std::string::npos;
+        if (tab1 == std::string::npos || tab2 == std::string::npos || tab3 == std::string::npos) {
+            yyjson_mut_doc_free(doc);
+            fprintf(stderr, "[DataExtractor] get_info(unit): parse error: %s\n", line.c_str());
+            return {};
+        }
+        std::string type_str = line.substr(0, tab1);
+        int combat = 0, moves = 0, cost = 0;
+        try {
+            combat = std::stoi(line.substr(tab1 + 1, tab2 - tab1 - 1));
+            moves  = std::stoi(line.substr(tab2 + 1, tab3 - tab2 - 1));
+            cost   = std::stoi(line.substr(tab3 + 1));
+        } catch (...) {
+            yyjson_mut_doc_free(doc);
+            fprintf(stderr, "[DataExtractor] get_info(unit): int parse error: %s\n", line.c_str());
+            return {};
+        }
+        yyjson_mut_obj_add_strcpy(doc, obj, "type", type_str.c_str());
+        yyjson_mut_obj_add_int(doc, obj, "combat", combat);
+        yyjson_mut_obj_add_int(doc, obj, "moves", moves);
+        yyjson_mut_obj_add_int(doc, obj, "cost", cost);
+
+    } else {
+        // Simple types (promotion, bonus, civilization, era): just "type"
+        yyjson_mut_obj_add_strcpy(doc, obj, "type", line.c_str());
+    }
+
+    size_t out_len = 0;
+    char* out_str = yyjson_mut_write(doc, 0, &out_len);
+    yyjson_mut_doc_free(doc);
+
+    if (!out_str) {
+        fprintf(stderr, "[DataExtractor] get_info: yyjson write failed\n");
+        return {};
+    }
+
+    std::string result_json(out_str, out_len);
+    free(out_str);
+
+    fprintf(stderr, "[DataExtractor] get_info(%s, %s): %s\n", type, key, result_json.c_str());
+    return result_json;
 }
 
 // ---------------------------------------------------------------------------
