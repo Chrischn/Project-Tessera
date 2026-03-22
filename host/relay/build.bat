@@ -43,9 +43,9 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-REM Step 2: Link — use both static CRT (startup code) and dynamic CRT imports (heap sharing)
+REM Step 2: Link into build\Debug (primary output)
 link /nologo /DLL ^
-    /OUT:..\bin\TesseraRelay.dll ^
+    /OUT:..\build\Debug\TesseraRelay.dll ^
     relay_main.obj relay_xml.obj relay_utility.obj relay_stubs.obj ^
     msvcrt.lib msvcprt.lib libcmt.lib libcpmt.lib kernel32.lib ^
     /FORCE:MULTIPLE
@@ -55,8 +55,12 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
+REM Copy to Release dir too (same binary — VS2003 has no debug/release split)
+if not exist "..\build\Release" mkdir "..\build\Release"
+copy /y "..\build\Debug\TesseraRelay.dll" "..\build\Release\TesseraRelay.dll" >nul
+
 echo.
-echo SUCCESS: ..\bin\TesseraRelay.dll
+echo SUCCESS: build\Debug\TesseraRelay.dll (+ copied to build\Release\)
 echo.
 
 REM Cleanup intermediate files
@@ -64,8 +68,8 @@ del /q *.obj *.exp 2>nul
 
 REM Verify exports
 echo Exports:
-dumpbin /exports ..\bin\TesseraRelay.dll | findstr "relay_"
+dumpbin /exports ..\build\Debug\TesseraRelay.dll | findstr "relay_"
 
 echo.
 echo Dependencies (should show MSVCR71.dll and MSVCP71.dll):
-dumpbin /dependents ..\bin\TesseraRelay.dll | findstr -i "msvc"
+dumpbin /dependents ..\build\Debug\TesseraRelay.dll | findstr -i "msvc"

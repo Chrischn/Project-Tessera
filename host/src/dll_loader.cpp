@@ -25,13 +25,18 @@ static HostCallbacks s_hostCallbacks;
 bool DllLoader::load(const std::string& dll_path) {
     fprintf(stderr, "[DLL] Loading: %s\n", dll_path.c_str());
 
-    // Set DLL search directory to the parent of the DLL file.
+    // Set DLL search directory to the BTS root (not the mod directory).
     // CvGameCoreDLL.dll depends on boost_python-vc71-mt-1_32.dll and python24.dll
-    // which live alongside it or in the BTS root directory.
-    std::string dll_dir = dll_path.substr(0, dll_path.find_last_of("/\\"));
-    std::string bts_dir = dll_dir.substr(0, dll_dir.find_last_of("/\\")); // up from Assets/
-    fprintf(stderr, "[DLL] Adding DLL search path: %s\n", bts_dir.c_str());
-    SetDllDirectoryA(bts_dir.c_str());
+    // which always live in the BTS root, even when loading a mod's DLL.
+    extern std::string g_basePath;
+    std::string bts_root = g_basePath + "\\Beyond the Sword";
+    fprintf(stderr, "[DLL] Adding DLL search path: %s\n", bts_root.c_str());
+    SetDllDirectoryA(bts_root.c_str());
+
+    // Set working directory to BTS root. Mods with built-in XML parsers
+    // (e.g., RapidXML in Rise of Mankind) open files relative to CWD.
+    SetCurrentDirectoryA(bts_root.c_str());
+    fprintf(stderr, "[DLL] Set working directory: %s\n", bts_root.c_str());
 
     m_hDll = LoadLibraryA(dll_path.c_str());
     if (!m_hDll) {
@@ -319,6 +324,7 @@ bool DllLoader::load_xml_data() {
                 fprintf(stderr, "[DLL ERROR] %s crashed: 0x%08X\n", name, GetExceptionCode()); \
                 fprintf(stderr, "[DLL ERROR] Last callback #%d: %s\n", g_cbCallCount, g_cbLastName); \
                 fprintf(stderr, "[DLL ERROR] Last XML file: %s\n", g_cbLastXmlFile); \
+                fflush(stderr); \
                 /* Continue to next step instead of aborting */ \
             } \
         } while(0)
@@ -354,28 +360,11 @@ bool DllLoader::load_xml_data() {
 
     fprintf(stderr, "[DLL] === XML Loading Sequence Complete ===\n");
 
-cleanup:
-    // --- Destroy FXml parser ---
-    fprintf(stderr, "[DLL] Calling DestroyFXml()...\n");
-    __try {
-        m_pfnXmlDestroyFXml(xmlUtilBuf);
-        fprintf(stderr, "[DLL] DestroyFXml() completed\n");
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        fprintf(stderr, "[DLL ERROR] DestroyFXml() crashed: 0x%08X\n",
-                GetExceptionCode());
-    }
-
-    // --- Destruct CvXMLLoadUtility ---
-    fprintf(stderr, "[DLL] Destructing CvXMLLoadUtility...\n");
-    __try {
-        m_pfnXmlDtor(xmlUtilBuf);
-        fprintf(stderr, "[DLL] CvXMLLoadUtility destructed OK\n");
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        fprintf(stderr, "[DLL ERROR] CvXMLLoadUtility destructor crashed: 0x%08X\n",
-                GetExceptionCode());
-    }
+    // Skip DestroyFXml and CvXMLLoadUtility destructor cleanup.
+    // Mod DLLs with custom allocators (global operator new override) can cause
+    // STATUS_HEAP_CORRUPTION during cleanup which bypasses SEH via __fastfail.
+    // The XML data is fully loaded — cleanup is unnecessary for a one-shot process.
+    fprintf(stderr, "[DLL] Skipping FXml/XMLUtility cleanup (heap corruption workaround)\n");
 
     fprintf(stderr, "[DLL] === XML Loading Orchestration End ===\n");
     return true;
@@ -385,10 +374,13 @@ cleanup:
 // unload — free the DLL and reset all state
 // ---------------------------------------------------------------------------
 void DllLoader::unload() {
-    // Unload game DLL first (it depends on relay being loaded)
+    // Skip FreeLibrary for CvGameCoreDLL — its CvGlobals destructor triggers
+    // STATUS_HEAP_CORRUPTION due to small buffer overflows in the game DLL's
+    // internal allocations during XML loading. The overflows write past heap
+    // block boundaries; the debug heap absorbs them but the normal heap doesn't.
+    // Since we're a one-shot process, let the OS reclaim memory on exit.
     if (m_hDll) {
-        fprintf(stderr, "[DLL] Unloading CvGameCoreDLL\n");
-        FreeLibrary(m_hDll);
+        fprintf(stderr, "[DLL] Skipping CvGameCoreDLL FreeLibrary (heap corruption workaround)\n");
         m_hDll = nullptr;
     }
     m_pGlobals       = nullptr;

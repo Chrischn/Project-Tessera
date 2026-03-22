@@ -759,11 +759,20 @@ public:
     }
 
     void MessageBox(const TCHAR* szText, const TCHAR* szCaption) {
-        (void)szText; (void)szCaption;
+        (void)szCaption;
+        static int s_allocZeroCount = 0;
         fprintf(stderr, "[TesseraRelay] MessageBox: %s — %s\n",
             szCaption ? szCaption : "(null)",
             szText ? szText : "(null)");
         fflush(stderr);
+        if (szText && strstr(szText, "Allocating zero")) {
+            s_allocZeroCount++;
+            fprintf(stderr, "[TesseraRelay] *** ALLOC_ZERO #%d ***\n", s_allocZeroCount);
+            fflush(stderr);
+            if (s_allocZeroCount == 1) {
+                __asm { int 3 }
+            }
+        }
     }
 
     void SetDone(bool bDone) {

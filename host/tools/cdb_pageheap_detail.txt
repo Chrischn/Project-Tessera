@@ -1,0 +1,16 @@
+.echo ============================================
+.echo  CDB — Page heap: detailed first AV
+.echo ============================================
+lmf
+
+* Stop on first AV — dump everything useful
+sxe -c ".echo ===PAGE_HEAP_AV===;.exr -1;r;kbn 50;.echo ---HEAP_BLOCK---;!heap -p -a @ecx;.echo ---DISASM---;u @eip-10 L20;.echo ===END===;q" av
+
+* Pass breakpoint exceptions
+sxe -c "gN" bpe
+
+* On process exit, quit
+sxe -c "q" epr
+
+.echo === Continuing ===
+g

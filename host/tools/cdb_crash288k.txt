@@ -1,0 +1,13 @@
+.echo ============================================
+.echo  CDB — Break near crash point CB #288497
+.echo ============================================
+lmf
+
+* Break on AV — dump full state including raw stack for game DLL frames
+sxe -c ".echo ===AV===;.exr -1;r;kbn 30;u @eip L10;dds @esp L100;.echo ===END_AV===;q" av
+
+* On process exit, quit
+sxe -c "q" epr
+
+.echo === Continuing ===
+g

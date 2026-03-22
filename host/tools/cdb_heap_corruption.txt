@@ -1,0 +1,20 @@
+.echo ============================================
+.echo  CDB — Catch heap corruption + dump stack
+.echo ============================================
+lmf
+
+* Catch STATUS_HEAP_CORRUPTION (0xC0000374) first-chance
+* Dump exception record, registers, stack with symbols, then quit
+sxe -c ".echo ===HEAP_CORRUPTION===;.exr -1;r;kbn 50;.echo ---RAW_STACK---;dds @esp L300;.echo ===END===;q" 0xc0000374
+
+* Pass AVs to SEH
+sxe -c "gN" av
+
+* Pass breakpoint exceptions (our int 3 from MessageBox stub)
+sxe -c "gN" bpe
+
+* On process exit, quit
+sxe -c "q" epr
+
+.echo === Continuing ===
+g

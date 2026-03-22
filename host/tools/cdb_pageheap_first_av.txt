@@ -1,0 +1,16 @@
+.echo ============================================
+.echo  CDB — Page heap: stop on FIRST AV
+.echo ============================================
+lmf
+
+* Stop on first access violation — this is the page heap catching the exact overflow
+sxe -c ".echo ===PAGE_HEAP_AV===;.exr -1;r;kbn 50;.echo ---RAW_STACK---;dds @esp L100;.echo ===END===;q" av
+
+* Pass breakpoint exceptions (our int 3 from MessageBox stub)
+sxe -c "gN" bpe
+
+* On process exit, quit
+sxe -c "q" epr
+
+.echo === Continuing ===
+g

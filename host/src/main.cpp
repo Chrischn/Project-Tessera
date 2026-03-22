@@ -19,6 +19,10 @@
 #include <windows.h>
 #include <objbase.h>
 
+#ifndef STATUS_HEAP_CORRUPTION
+#define STATUS_HEAP_CORRUPTION 0xC0000374
+#endif
+
 #include "tcp_server.h"
 #include "message_protocol.h"
 #include "dll_loader.h"
@@ -28,23 +32,33 @@ extern int g_cbCallCount;
 extern const char* g_cbLastName;
 extern const char* g_cbLastXmlFile;
 
-// Vectored exception handler — catches crashes even outside SEH blocks
-static LONG WINAPI CrashHandler(EXCEPTION_POINTERS* ep) {
-    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
-        fprintf(stderr, "\n[CRASH] Access violation at 0x%08X\n",
-            (unsigned)ep->ExceptionRecord->ExceptionAddress);
-        fprintf(stderr, "[CRASH] Last callback #%d: %s\n", g_cbCallCount, g_cbLastName);
-        fprintf(stderr, "[CRASH] Last XML file: %s\n", g_cbLastXmlFile);
-        fprintf(stderr, "[CRASH] Fault address: 0x%08X (%s)\n",
-            (unsigned)ep->ExceptionRecord->ExceptionInformation[1],
-            ep->ExceptionRecord->ExceptionInformation[0] ? "write" : "read");
+// Vectored exception handler — first-chance, catches crashes before SEH
+static LONG NTAPI VehCrashHandler(EXCEPTION_POINTERS* ep) {
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    if (code == EXCEPTION_ACCESS_VIOLATION ||
+        code == EXCEPTION_STACK_OVERFLOW ||
+        code == STATUS_HEAP_CORRUPTION) {
+        fprintf(stderr, "\n[VEH] Exception 0x%08X at 0x%08X\n",
+            (unsigned)code, (unsigned)ep->ExceptionRecord->ExceptionAddress);
+        fprintf(stderr, "[VEH] Last callback #%d: %s\n", g_cbCallCount, g_cbLastName);
+        fprintf(stderr, "[VEH] Last XML file: %s\n", g_cbLastXmlFile);
+        if (code == EXCEPTION_ACCESS_VIOLATION) {
+            fprintf(stderr, "[VEH] Fault address: 0x%08X (%s)\n",
+                (unsigned)ep->ExceptionRecord->ExceptionInformation[1],
+                ep->ExceptionRecord->ExceptionInformation[0] ? "write" : "read");
+        }
+        fprintf(stderr, "[VEH] EIP=0x%08X ESP=0x%08X EBP=0x%08X\n",
+            (unsigned)ep->ContextRecord->Eip,
+            (unsigned)ep->ContextRecord->Esp,
+            (unsigned)ep->ContextRecord->Ebp);
         fflush(stderr);
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
 int main(int argc, char* argv[]) {
-    SetUnhandledExceptionFilter(CrashHandler);
+    setvbuf(stderr, NULL, _IONBF, 0);  // Unbuffered stderr — survive crashes
+    AddVectoredExceptionHandler(1, VehCrashHandler);
     CoInitialize(NULL);
     printf("[TesseraHost] Starting (32-bit host process)\n");
     printf("[TesseraHost] Build: %s %s\n", __DATE__, __TIME__);

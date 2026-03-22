@@ -30,6 +30,7 @@ def recv_msg(sock, timeout=300):
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 12345
     base_path = sys.argv[2] if len(sys.argv) > 2 else r"E:\Programming\Civ4"
+    mod_name = sys.argv[3] if len(sys.argv) > 3 else ""
 
     # Retry connection — cdb needs a moment to start the process
     for attempt in range(10):
@@ -47,8 +48,11 @@ def main():
         sys.exit(1)
 
     # Send init command
-    print(f"[debug_client] Sending init (base_path={base_path})...")
-    send_msg(sock, {"cmd": "init", "base_path": base_path})
+    init_cmd = {"cmd": "init", "base_path": base_path}
+    if mod_name:
+        init_cmd["mod"] = mod_name
+    print(f"[debug_client] Sending init (base_path={base_path}, mod={mod_name or 'none'})...")
+    send_msg(sock, init_cmd)
 
     # Wait for response (XML loading takes a while — 285k+ callbacks)
     print("[debug_client] Waiting for init response (up to 5 min)...")

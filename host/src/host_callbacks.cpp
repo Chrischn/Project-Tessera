@@ -36,9 +36,11 @@ extern std::string g_modName;
 // =============================================================================
 
 struct FXml {
+    unsigned int canary_head = 0xDEADBEEF;
     pugi::xml_document doc;
     pugi::xml_node current_node;
     bool loaded = false;
+    unsigned int canary_tail = 0xCAFEBABE;
 };
 
 struct FXmlSchemaCache {
@@ -52,9 +54,25 @@ int g_cbCallCount = 0;
 const char* g_cbLastName = "";
 const char* g_cbLastXmlFile = "";
 
+// Track the active FXml pointer for canary checks
+static FXml* g_activeFXml = NULL;
+
 static void cb_trace(const char* name) {
     g_cbCallCount++;
     g_cbLastName = name;
+}
+
+static void check_fxml_canary(FXml* xml, const char* caller) {
+    if (!xml) return;
+    if (xml->canary_head != 0xDEADBEEF || xml->canary_tail != 0xCAFEBABE) {
+        fprintf(stderr, "\n[CANARY] *** FXml CORRUPTED at cb #%d (%s) ***\n",
+            g_cbCallCount, caller);
+        fprintf(stderr, "[CANARY] head=0x%08X (expect DEADBEEF) tail=0x%08X (expect CAFEBABE)\n",
+            xml->canary_head, xml->canary_tail);
+        fprintf(stderr, "[CANARY] xml=%p loaded=%d\n", (void*)xml, xml->loaded);
+        fprintf(stderr, "[CANARY] Last XML file: %s\n", g_cbLastXmlFile);
+        fflush(stderr);
+    }
 }
 
 // =============================================================================
@@ -191,12 +209,6 @@ static int cb_xml_set_to_child(void* xml_ptr) {
 
 static int cb_xml_set_to_child_by_tag(void* xml_ptr, const char* tag) {
     cb_trace("cb_xml_set_to_child_by_tag");
-    if (g_cbCallCount == 285872) {
-        fprintf(stderr, "[CRASH_POINT] SetToChildByTagName xml=%p tag='%s' node='%s'\n",
-            xml_ptr, tag ? tag : "(null)",
-            xml_ptr ? static_cast<FXml*>(xml_ptr)->current_node.name() : "BAD_PTR");
-        fflush(stderr);
-    }
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node child = xml->current_node.child(tag);
     if (!child) return 0;
@@ -341,7 +353,10 @@ static int cb_xml_get_last_node_text_size(void* xml_ptr) {
     cb_trace("cb_xml_get_last_node_text_size");
     FXml* xml = static_cast<FXml*>(xml_ptr);
     std::string text = get_node_text(xml);
-    return static_cast<int>(text.size());
+    // Original uses SysStringLen() which returns strlen WITHOUT null terminator.
+    // BtS DLL never calls this during XML loading. Return size+1 as safety margin
+    // since any caller that allocates based on this needs space for the null.
+    return static_cast<int>(text.size()) + 1;
 }
 
 static int cb_xml_get_tag_name(void* xml_ptr, char* buf, int buf_size) {
@@ -370,12 +385,16 @@ static int cb_xml_get_num_siblings(void* xml_ptr) {
     FXml* xml = static_cast<FXml*>(xml_ptr);
     pugi::xml_node parent = xml->current_node.parent();
     if (!parent) return 0;
+    // Count all element children of parent, then subtract 1 for the current node.
+    // Original FXml counts following siblings only (via get_nextSibling from current),
+    // but when positioned on the first element (the SDK's only usage pattern), both
+    // approaches give the same result: total_elements - 1.
     int count = 0;
     for (pugi::xml_node sib = parent.first_child(); sib;
          sib = sib.next_sibling()) {
         if (sib.type() == pugi::node_element) count++;
     }
-    return count;
+    return (count > 0) ? count - 1 : 0;
 }
 
 static int cb_xml_num_children_by_tag(void* xml_ptr, const char* tag) {

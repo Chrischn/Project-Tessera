@@ -62,7 +62,7 @@ public:
     }
 
     bool Validate(FXml* xml, TCHAR* pszError) {
-        return true;  // No validation for MVP
+        return true;  // No validation needed
     }
 
     // --- Navigation ---
@@ -210,7 +210,29 @@ public:
     int GetInsertedNodeTextSize(FXml* xml) { return 0; }
     bool GetInsertedNodeText(FXml* xml, TCHAR* pszText) { return false; }
     bool SetInsertedNodeText(FXml* xml, TCHAR* pszText) { return false; }
-    bool GetLastLocatedNodeType(FXml* xml, TCHAR* pszType) { return false; }
+    bool GetLastLocatedNodeType(FXml* xml, TCHAR* pszType) {
+        HostCallbacks* cb = relay_get_callbacks();
+        // The game DLL compares against "float", "int", "boolean" to determine
+        // how to parse GlobalDefines values. The tag names follow the convention:
+        //   iDefineIntVal   → int
+        //   fDefineFloatVal → float
+        //   bDefine...      → boolean
+        //   DefineTextVal   → string (empty type, falls through to else)
+        // Derive the type from the first character of the tag name.
+        char tagName[256];
+        if (!cb->xml_get_tag_name(static_cast<void*>(xml), tagName, sizeof(tagName)))
+            return false;
+        if (tagName[0] == 'f' && tagName[1] == 'D') {
+            strcpy(pszType, "float");
+        } else if (tagName[0] == 'i' && tagName[1] == 'D') {
+            strcpy(pszType, "int");
+        } else if (tagName[0] == 'b' && tagName[1] == 'D') {
+            strcpy(pszType, "boolean");
+        } else {
+            strcpy(pszType, "");
+        }
+        return true;
+    }
     bool GetLastInsertedNodeType(FXml* xml, TCHAR* pszType) { return false; }
 
     // --- Query methods ---
