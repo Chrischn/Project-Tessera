@@ -1,0 +1,18 @@
+.echo ============================================
+.echo  TesseraHost CDB Debug Session
+.echo ============================================
+
+* List loaded modules at startup
+lmf
+
+* Break on first-chance access violation (before SEH catches it)
+* Dump registers, stack trace (50 frames), disasm at crash, raw stack, exception record
+* Then pass to SEH handler via gN
+sxe -c ".echo ===ACCESS_VIOLATION===;.exr -1;r;kbn 50;u @eip L20;dd @esp L40;!address @eip;.echo ===END_AV===;gN" av
+
+* On process exit, dump final module list and quit
+sxe -c ".echo ===PROCESS_EXIT===;lmf;q" epr
+
+* Continue execution (host will wait for TCP client)
+.echo === Continuing to main() ===
+g

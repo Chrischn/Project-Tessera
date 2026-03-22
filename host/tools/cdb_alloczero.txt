@@ -1,0 +1,15 @@
+.echo ============================================
+.echo  CDB — First "Allocating zero" breakpoint
+.echo ============================================
+lmf
+
+* Break on int 3: dump registers and deep raw stack
+sxe -c ".echo ===ALLOC_ZERO===;r;.echo ---STACK---;dds @esp L120;.echo ===END===;q" bpe
+
+* Pass AVs to SEH
+sxe -c "gN" av
+
+sxe -c "q" epr
+
+.echo === Continuing ===
+g

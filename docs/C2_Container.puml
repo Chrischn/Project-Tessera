@@ -1,0 +1,40 @@
+@startuml C2_Container
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Project Tessera — C2 Container
+
+LAYOUT_WITH_LEGEND()
+
+Person(player,      "Player",      "Plays mods")
+Person(contributor, "Contributor", "Develops the engine")
+
+System_Boundary(tessera, "Project Tessera") {
+    Container(godot_project, "Godot Project",       "Godot 4.5 / GDScript",  "Scene management, UI, 3D world viewport, asset loading, and HostBridge TCP client")
+    Container(gdextension,   "GDExtension 'niflib'",  "C++17 / 64-bit DLL",   "NIF mesh loading: translates Civ4 .nif/.kfm files into Godot scene nodes")
+    Container(tessera_host,  "TesseraHost.exe",      "C++17 / 32-bit EXE",   "Loads CvGameCoreDLL.dll, orchestrates XML loading, extracts game data via Python 2.4, serves JSON over TCP")
+    Container(tessera_relay, "TesseraRelay.dll",     "C++03 / 32-bit DLL (VS2003)", "CRT isolation layer: translates VS2003 STL types to C-compatible types for TesseraHost")
+}
+
+Container_Ext(niflib,       "niflib",       "C++14 / static lib",  "NIF binary format parser")
+Container_Ext(godot_cpp,    "godot-cpp",    "C++17 / submodule",   "Godot engine C++ bindings")
+Container_Ext(pugixml,      "pugixml",      "C++11 / submodule",   "XML parser (backs CvDLLXmlIFaceBase)")
+Container_Ext(yyjson,       "yyjson",       "C99 / submodule",     "JSON serializer for TCP protocol")
+Container_Ext(civ4_assets,  "Civ IV + BtS", "Binary / XML files",  "Read-only game assets: .fpk, .nif, XML, textures")
+Container_Ext(cvgamecore,   "CvGameCoreDLL.dll", "C++ / 32-bit (VS2003)", "Unmodified game logic DLL (vanilla or mod)")
+
+Rel(player,         godot_project,  "Launches")
+Rel(godot_project,  gdextension,    "Loads NIF models via",      "GDExtension API")
+Rel(godot_project,  tessera_host,   "Queries game data via",     "TCP / JSON")
+Rel(godot_project,  civ4_assets,    "Reads .fpk archives from",  "File I/O")
+Rel(tessera_host,   tessera_relay,  "Calls via",                 "C function pointers")
+Rel(tessera_relay,  cvgamecore,     "Implements gDLL interfaces for", "VS2003 C++ vtable")
+Rel(tessera_host,   pugixml,        "Parses XML with",           "Static link")
+Rel(tessera_host,   yyjson,         "Serializes JSON with",      "Static link")
+Rel(tessera_host,   civ4_assets,    "Reads XML configs from",    "File I/O")
+Rel(gdextension,    niflib,         "Parses .nif with",          "Static link")
+Rel(gdextension,    godot_cpp,      "Uses bindings from",        "Static link")
+Rel(gdextension,    civ4_assets,    "Reads .nif meshes from",    "File I/O")
+Rel(contributor,    godot_project,  "Develops")
+
+@enduml

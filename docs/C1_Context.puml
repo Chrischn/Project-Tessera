@@ -1,0 +1,28 @@
+@startuml C1_Context
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title Project Tessera — C1 System Context
+
+LAYOUT_WITH_LEGEND()
+
+Person(player,       "Player",      "Plays Civilization IV mods using Project Tessera as the runtime")
+Person(mod_author,   "Mod Author",  "Creates mods for Civilization IV")
+Person(contributor,  "Contributor", "Develops the Project Tessera engine")
+
+System(tessera, "Project Tessera", "Clean-room, open-source, Godot-based, 64-bit runtime for Civilization IV mods. Loads game assets and runs mod logic without the original engine.")
+
+System_Ext(civ4,   "Civ IV + BtS Installation", "Provides original read-only game assets: .fpk archives, .nif meshes, XML data, textures")
+System_Ext(github,  "GitHub",                    "Source control, issue tracking, and collaboration platform for the project")
+System_Ext(civ4mods,  "Mods",                    "Original Civ IV mods like XML, assets, Total Conversion Mods")
+
+Rel(player,      tessera, "Plays")
+Rel(player,      civ4mods, "Uses mods")
+Rel(mod_author,  civ4mods, "Creates mods")
+Rel(contributor, tessera, "Develops")
+Rel(tessera,     civ4,   "Reads game assets from", "File I/O")
+Rel(tessera,     github,   "Hosted on")
+Rel(contributor, github,  "Pushes and reviews code on")
+Rel(civ4mods,    tessera, "Loaded by")
+
+@enduml

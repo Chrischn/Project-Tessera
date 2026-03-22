@@ -32,6 +32,9 @@ var assets1 := {}
 var assets2 := {}
 var assets3 := {}
 
+# Reference to the HostBridge node (set by InitScene after spawning)
+var host_bridge: HostBridge = null
+
 
 # Path to the config file saved in the user's local Godot data directory (C:\Users\username\AppData\Roaming\Godot\app_userdata\PROJECTNAME)
 const CONFIG_PATH := "user://Tessera.ini"

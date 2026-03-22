@@ -38,26 +38,87 @@ func _ready() -> void:
 	Global.assets1 = FPK_Loader.parse_fpk_archive(base_path.path_join("Assets/Assets1.fpk"))
 	Global.assets2 = FPK_Loader.parse_fpk_archive(base_path.path_join("Assets/Assets2.fpk"))
 	Global.assets3 = FPK_Loader.parse_fpk_archive(base_path.path_join("Assets/Assets3.fpk"))
-	#print(Global.assets0)
-	#print(Global.assets0["spy.kfm"].hex_encode())
-	#print(Global.assets1["civtitle.dds"].hex_encode())
-	#print(Global.assets3["maceman_md_fidget.kf"].hex_encode())
+
+	# Initialize VFS with loaded FPK archives and base path
+	VFS.initialize(base_path, Global.assets0, Global.assets1, Global.assets2, Global.assets3)
 	
 	await get_tree().create_timer(0.1).timeout
-	find_child("ProgressText").text = "Init Check XML"
-	await get_tree().create_timer(0.2).timeout
-	find_child("ProgressText").text = "Init Audio"
-	await get_tree().create_timer(0.2).timeout
-	find_child("ProgressText").text = "Init Python"
-	await get_tree().create_timer(0.2).timeout
-	find_child("ProgressText").text = "Init XML (cached)"
-	await get_tree().create_timer(0.2).timeout
+
+	# --- Host Bridge: spawn TesseraHost.exe and load XML data ----------------
+	find_child("ProgressText").text = "Init Game Logic"
+	await get_tree().process_frame
+
+	var host_start_time := Time.get_ticks_msec()
+
+	Global.host_bridge = HostBridge.new()
+	add_child(Global.host_bridge)  # Must be in tree for _process() and timers
+	Global.host_bridge.connection_lost.connect(_on_host_connection_lost)
+
+	if await Global.host_bridge.spawn_host():
+		var spawn_time := Time.get_ticks_msec() - host_start_time
+		print("[Init] Host spawned + connected in %d ms" % spawn_time)
+
+		find_child("ProgressText").text = "Loading XML Data"
+		await get_tree().process_frame
+		var xml_start_time := Time.get_ticks_msec()
+		var result = await Global.host_bridge.init_game(base_path)
+		var xml_time := Time.get_ticks_msec() - xml_start_time
+		var total_time := Time.get_ticks_msec() - host_start_time
+
+		if result.get("status") == "ok":
+			print("[Init] XML data loaded in %d ms" % xml_time)
+			print("[Init] Game logic initialized successfully (total: %d ms / %.1f s)" % [total_time, total_time / 1000.0])
+
+			# --- Quick data query test ---
+			var tech_result = await Global.host_bridge.get_all_infos("tech")
+			if tech_result.get("status") == "ok":
+				var techs = tech_result.get("data", [])
+				print("[Init] Techs loaded: %d" % techs.size())
+				if techs.size() > 0:
+					print("[Init]   First: %s" % str(techs[0]))
+
+			var building_result = await Global.host_bridge.get_all_infos("building")
+			if building_result.get("status") == "ok":
+				var buildings = building_result.get("data", [])
+				print("[Init] Buildings loaded: %d" % buildings.size())
+				if buildings.size() > 0:
+					print("[Init]   First: %s" % str(buildings[0]))
+
+			var unit_result = await Global.host_bridge.get_all_infos("unit")
+			if unit_result.get("status") == "ok":
+				var units = unit_result.get("data", [])
+				print("[Init] Units loaded: %d" % units.size())
+				if units.size() > 0:
+					print("[Init]   First: %s" % str(units[0]))
+
+			var civ_result = await Global.host_bridge.get_all_infos("civilization")
+			if civ_result.get("status") == "ok":
+				print("[Init] Civilizations loaded: %d" % civ_result.get("data", []).size())
+
+			var era_result = await Global.host_bridge.get_all_infos("era")
+			if era_result.get("status") == "ok":
+				print("[Init] Eras: %d" % era_result.get("data", []).size())
+
+			var art_result = await Global.host_bridge.get_art_info("unit", "ART_DEF_UNIT_WARRIOR")
+			if art_result.get("status") == "ok":
+				print("[Init] ART_DEF_UNIT_WARRIOR: %s" % str(art_result.get("data")))
+			else:
+				print("[Init] Art lookup: %s" % str(art_result.get("message", "failed")))
+		else:
+			push_error("[Init] Host init failed: " + str(result.get("message", "unknown")))
+	else:
+		push_error("[Init] Failed to spawn TesseraHost")
+
 	find_child("ProgressText").text = "Init Engine"
 	await get_tree().create_timer(0.2).timeout
 	find_child("ProgressText").text = "Init Fonts"
 	await get_tree().create_timer(0.2).timeout
 	
 	call_deferred("_proceed_to_menu") # Proceed to MenuScene function
+
+## Called when HostBridge detects the TCP connection was lost unexpectedly.
+func _on_host_connection_lost():
+	push_error("[Host] Connection to TesseraHost lost!")
 
 # Changes the scene to the main menu after short delay
 func _proceed_to_menu() -> void:

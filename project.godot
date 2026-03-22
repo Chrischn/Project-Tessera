@@ -13,7 +13,7 @@ config_version=5
 config/name="Project Tessera"
 config/version="0.01"
 run/main_scene="uid://w7veat4ud02l"
-config/features=PackedStringArray("4.5", "GL Compatibility")
+config/features=PackedStringArray("4.5", "Forward Plus")
 boot_splash/show_image=false
 boot_splash/fullsize=false
 config/icon="uid://bm2whnj0m051b"
@@ -21,6 +21,12 @@ config/icon="uid://bm2whnj0m051b"
 [autoload]
 
 Global="*res://scripts/Global.gd"
+VFS="*res://scripts/VFS.gd"
+
+[debug]
+
+file_logging/enable_file_logging=true
+file_logging/max_log_files=1
 
 [display]
 
@@ -74,5 +80,5 @@ move_sprint={
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
+rendering_device/driver="d3d12"
+driver/depth_prepass/enable=false

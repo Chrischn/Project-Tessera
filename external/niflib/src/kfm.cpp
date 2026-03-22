@@ -63,8 +63,8 @@ unsigned int Kfm::Read( istream & in ) {
 	// supported versions
 	if ( headerstr == ";Gamebryo KFM File Version 2.0.0.0b" ) version = VER_KFM_2_0_0_0b;
 	else if ( headerstr == ";Gamebryo KFM File Version 1.2.4b" ) version = VER_KFM_1_2_4b;
-	//else if ( headerstr == ";Gamebryo KFM File Version 1.0" ) version = VER_KFM_1_0;
-	//else if ( headerstr == ";Gamebryo KFM File Version 1.0\r" ) version = VER_KFM_1_0; // Windows eol style
+	else if ( headerstr == ";Gamebryo KFM File Version 1.0" ) version = VER_KFM_1_0;
+	else if ( headerstr == ";Gamebryo KFM File Version 1.0\r" ) version = VER_KFM_1_0; // Windows eol style
 	else {
 		version = VER_UNSUPPORTED;
 		return version;
@@ -72,7 +72,50 @@ unsigned int Kfm::Read( istream & in ) {
 	
 	//--Read remainder--//
 	if (version == VER_KFM_1_0) {
-		// TODO write a parser
+		// KFM 1.0 is a text format with KEY#VALUE# fields
+		string line;
+		while (getline(in, line)) {
+			// Strip \r from Windows line endings
+			if (!line.empty() && line[line.size()-1] == '\r')
+				line.erase(line.size()-1);
+			// Strip leading whitespace (transitions are indented)
+			size_t start = line.find_first_not_of(" \t");
+			if (start == string::npos) continue;
+			line = line.substr(start);
+
+			if (line.empty() || line[0] == ';') continue;
+			if (line == "END_KFM_FILE") break;
+
+			if (line.substr(0, 6) == "MODEL#") {
+				// MODEL#<nif_filename>#<root_node>#
+				size_t p1 = 6;
+				size_t p2 = line.find('#', p1);
+				if (p2 != string::npos) {
+					nif_filename = line.substr(p1, p2 - p1);
+				}
+			}
+			else if (line.substr(0, 10) == "ANIMATION#") {
+				// ANIMATION#EVENTCODE <id>#<action_name>#<kf_filename>#INDEX <idx>#
+				KfmAction action;
+				vector<string> fields;
+				size_t pos = 10;
+				while (pos < line.size()) {
+					size_t next = line.find('#', pos);
+					if (next == string::npos) break;
+					fields.push_back(line.substr(pos, next - pos));
+					pos = next + 1;
+				}
+				// fields[0] = "EVENTCODE <id>", [1] = action_name, [2] = kf_filename, [3] = "INDEX <idx>"
+				if (fields.size() >= 3) {
+					action.action_name = fields[1];
+					action.action_filename = fields[2];
+					action.unk_int1 = 0;
+					action.unk_int2 = 0;
+					actions.push_back(action);
+				}
+			}
+			// TRANSITION, DEFAULTPATHS, etc. are skipped — not used by our runtime
+		}
 	} else {
 		if (version >= VER_KFM_2_0_0_0b) unk_byte = ReadByte(in);
 		else unk_byte = 1;

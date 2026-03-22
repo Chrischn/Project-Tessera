@@ -1,4 +1,13 @@
-// register_types.cpp
+// =============================================================================
+// File:              register_types.cpp
+// Author(s):         Chrischn89
+// Godot Version:     4.5
+// Description:
+//   GDExtension registration boilerplate for Godot module system
+//
+// License:
+//   Released under the terms of the GNU General Public License version 3.0
+// =============================================================================
 #include <gdextension_interface.h>
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/core/class_db.hpp>

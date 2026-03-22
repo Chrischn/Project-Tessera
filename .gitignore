@@ -17,7 +17,10 @@ addons/
 data_*/
 mono_crash.*.json
 
-# SCons-specific ignores
+# CMake build directory
+build/
+
+# SCons artifacts (build system replaced by CMake)
 .sconsign.dblite
 .sconsign.dblite.d/*
 
@@ -38,3 +41,9 @@ external/niflib/build_vs2022_static/
 external/niflib/.vscode
 extensions/src/gdext_niflib/gdext_niflib.windows.template_debug.x86_64.obj
 /external/niflib/.vscode
+CLAUDE.md
+.claude/
+docs/superpowers/
+host/build/
+host/bin/*.exp
+host/bin/*.lib
